@@ -27,13 +27,12 @@ class table_writer {
 		// which we must make sure to only read!
 		flint::mpoly_ctx ctx;
 		std::vector<std::string> var_names;
-		std::vector<const char*> var_names_c;
 		std::vector<flint::mpoly> var_mpoly;
 		std::vector<std::string> var_names_ep;
 		std::vector<const char*> var_names_ep_c;
 		std::vector<flint::mpoly> var_mpoly_ep;
 		std::vector<fmpz_mpoly_struct*> var_mpoly_ep_pointers;
-		size_t d_var_index;
+		size_t d_var_index = std::numeric_limits<std::size_t>::max();
 
 		std::string f_lhs, f_rhs;
 
