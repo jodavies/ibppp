@@ -28,6 +28,9 @@ class blocking_queue {
 
 		blocking_queue(std::size_t max_size)
 			: max_queue_size(max_size) {
+			if ( max_queue_size == 0 ) {
+				throw std::invalid_argument("blocking_queue requires max size > 0");
+			}
 		}
 
 		void push(T item) {
@@ -39,7 +42,7 @@ class blocking_queue {
 
 			if ( done ) {
 				throw std::runtime_error(
-					std::format("{}: error: push on completed queue", __func__)
+					std::format("{}: error: push on closed queue", __func__)
 				);
 			}
 
@@ -67,7 +70,9 @@ class blocking_queue {
 			return true;
 		}
 
-		void complete() {
+		// No further items can be pushed to the queue.
+		// Existing items remain and can be popped until the queue is empty.
+		void close() {
 			std::lock_guard lock(prot);
 			done = true;
 			has_items_flag.notify_all();

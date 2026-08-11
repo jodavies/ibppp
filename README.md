@@ -7,6 +7,7 @@ Currently, `ibppp` can:
  - write out gzipped FORM fill statements for a tablebase
 
 TODO
+ - proper testing
  - read Kira tables
  - read FIRE tables in reversed format
  - read/write uncompressed files (based on extension?)

@@ -24,19 +24,18 @@ table_writer::table_writer(std::string filename_in, std::vector<std::string> var
 	: filename(filename_in), ctx(vars_in.size()), var_names(vars_in),
 		f_lhs(lhs_in), f_rhs(rhs_in)
 {
-	// Here we set up the output stream
-	raw_out.open(filename, std::ios::binary);
-	if ( ! raw_out.is_open() ) {
+	// Make sure var_names doesn't contain duplicate entries:
+	std::vector var_names_dedup = var_names;
+	std::sort(var_names_dedup.begin(), var_names_dedup.end());
+	auto last_unique = std::unique(var_names_dedup.begin(), var_names_dedup.end());
+	if (last_unique != var_names_dedup.end()) {
 		throw std::runtime_error(
-			std::format("{}::{}: unable to open file {}", class_name, __func__, filename)
+			std::format("{}::{}: invalid duplicate variable", class_name, __func__)
 		);
 	}
-	out.push(boost::iostreams::gzip_compressor());
-	out.push(raw_out);
-	std::cout << class_name << ": create " << filename << std::endl;
 
 	// Create a var names copy with ep instead of d, and make vectors of mpoly
-	// for both variable lists.
+	// for both variable lists, which we need later.
 	for ( size_t i = 0; i < var_names.size(); i++ ) {
 		var_mpoly.emplace_back(var_names[i], var_names, ctx.d);
 		if ( var_names[i] == "d" ) {
@@ -44,7 +43,7 @@ table_writer::table_writer(std::string filename_in, std::vector<std::string> var
 			var_names_ep.push_back("ep");
 			// "4-2*d" is correct here: we are simply sending var->4-2*var, not
 			// caring what it is called. The variable becomes "ep" in the final
-			// conversion to a string representation. Like this, there is no need
+			// conversion to a string representation. This way, there is no need
 			// to make a higher variable-count context for flint.
 			var_mpoly_ep.emplace_back("4-2*d", var_names, ctx.d);
 		}
@@ -61,26 +60,33 @@ table_writer::table_writer(std::string filename_in, std::vector<std::string> var
 	std::cout << class_name << ": vars:";
 	for ( size_t i = 0; i < var_names.size(); i++ ) {
 		std::cout << " " << var_names[i];
-		// Keep a copy of C string pointers for mpoly::to_string, we don't want
-		// to create it in every call.
-		var_names_c.push_back(var_names[i].c_str());
 	}
 	std::cout << " (->";
 	for ( size_t i = 0; i < var_names_ep.size(); i++ ) {
 		std::cout << " " << var_names_ep[i];
+		// Keep a copy of C string pointers for mpoly::to_string, we don't want
+		// to create it in every call.
 		var_names_ep_c.push_back(var_names_ep[i].c_str());
 	}
 	std::cout << ")" << std::endl;
 
-	// Make sure var_names doesn't contain duplicate entries:
-	std::vector var_names_dedup = var_names;
-	std::sort(var_names_dedup.begin(), var_names_dedup.end());
-	auto last_unique = std::unique(var_names_dedup.begin(), var_names_dedup.end());
-	if (last_unique != var_names_dedup.end()) {
+	// Make sure we found "d": for now it is required
+	if (d_var_index == std::numeric_limits<std::size_t>::max()) {
 		throw std::runtime_error(
-			std::format("{}::{}: invalid duplicate variable", class_name, __func__)
+			std::format("{}::{}: variable list does not contain 'd'", class_name, __func__)
 		);
 	}
+
+	// Finally set up the output stream, now that we are happy with the variables
+	raw_out.open(filename, std::ios::binary);
+	if ( ! raw_out.is_open() ) {
+		throw std::runtime_error(
+			std::format("{}::{}: unable to open file {}", class_name, __func__, filename)
+		);
+	}
+	out.push(boost::iostreams::gzip_compressor());
+	out.push(raw_out);
+	std::cout << class_name << ": create " << filename << std::endl;
 }
 // #]
 
@@ -91,8 +97,8 @@ void table_writer::write_form_fill(const rule_t& rule) {
 	// Create the whole output string in memory, and then finally write to the
 	// file with a lock. There might be parallel writers.
 
-	std::string fill_str("");
-	fill_str += "Fill " + f_lhs + rule.lhs.head + "(" + rule.lhs.indices + ") =\n";
+	std::string fill_str;
+	fill_str = "Fill " + f_lhs + rule.lhs.head + "(" + rule.lhs.indices + ") =\n";
 	for ( const auto& rhs : rule.rhs ) {
 		fill_str += "\t+ " + f_rhs + rhs.mi.head + "(" + rhs.mi.indices + ")";
 		coeff_t formatted_num = format_num(rhs.num);
@@ -101,6 +107,7 @@ void table_writer::write_form_fill(const rule_t& rule) {
 	}
 	fill_str += "\t;\n\n";
 
+	// It is important to lock here, to avoid concurrent writes to the stream.
 	std::lock_guard lock(out_lock);
 	out << fill_str;
 }
@@ -122,7 +129,6 @@ coeff_t table_writer::format_num(const coeff_t& num_str) {
 
 	flint::mpoly num(num_str.s, var_names, ctx.d);
 	flint::mpoly numep(ctx.d);
-	flint::mpoly ep_coeff(ctx.d);
 
 	// Variable change d->ep:
 	fmpz_mpoly_compose_fmpz_mpoly(numep.d, num.d, var_mpoly_ep_pointers.data(), ctx.d, ctx.d);
@@ -191,7 +197,8 @@ coeff_t table_writer::format_den(const coeff_t& den_str) {
 		fmpz_mpoly_factor_get_base(den.d, denep_fac.d, i, ctx.d);
 		std::string denep_fac_str = den.to_string(var_names_ep_c.data());
 
-		// Check if the base contains "ep" (or "d"):
+		// Check if the base contains "ep" (or "d") (the symbols don't have names
+		// until we print them: only d_var_index actually matters here)
 		const int64_t deg_ep = fmpz_mpoly_degree_si(den.d, d_var_index, ctx.d);
 
 		if ( fmpz_mpoly_equal(den.d, var_mpoly[d_var_index].d, ctx.d) ) {

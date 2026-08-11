@@ -33,7 +33,6 @@ fire_reader::fire_reader(std::string filename_in)
 fire_reader::integral_id_map fire_reader::read_integral_id_map() {
 
 	std::chrono::time_point<std::chrono::steady_clock> start_time = std::chrono::steady_clock::now();
-	std::chrono::duration<float> run_time(0);
 
 	// Set up the stream:
 	std::ifstream raw_stream(filename, std::ios::binary);
@@ -67,7 +66,12 @@ fire_reader::integral_id_map fire_reader::read_integral_id_map() {
 		integral_t new_integral = read_integral(stream);
 		parse::expect_char(stream, '}');
 
-		new_map[new_id] = new_integral;
+		auto [it, inserted] = new_map.emplace(new_id, new_integral);
+		if ( ! inserted ) {
+			throw std::runtime_error(
+				std::format("{}::{}: duplicate integral id: {}", class_name, __func__, new_id)
+			);
+		}
 
 	} while ( parse::try_consume_char(stream, ',') );
 
@@ -76,13 +80,15 @@ fire_reader::integral_id_map fire_reader::read_integral_id_map() {
 	parse::expect_char(stream, '}');
 	stream >> std::ws;
 	if ( ! stream.eof() ) {
+		std::string con = read_error_context(stream);
 		throw std::runtime_error(
-			std::format("{}::{}: unexpected extra stream content", class_name, __func__)
+			std::format("{}::{}: unexpected extra stream content: {}", class_name, __func__, con)
 		);
 	}
 
-	run_time += (std::chrono::steady_clock::now() - start_time);
-	std::cout << class_name << ": integral_id_map constructed in: " << run_time.count() << "s" << std::endl;
+	std::chrono::duration<double> elapsed_time = std::chrono::steady_clock::now() - start_time;
+	std::cout << class_name << ": integral_id_map constructed in: " << std::fixed
+		<< std::setprecision(3) << elapsed_time.count() << "s" << std::endl;
 
 	return new_map;
 }
@@ -104,16 +110,21 @@ fire_reader::integral_id_map fire_reader::read_integral_id_map() {
 rule_t fire_reader::read_rule(std::istream& stream) {
 
 	if ( ! parse::try_consume_char(stream, '{') ) {
-		std::string rest;
-		std::getline(stream, rest);
+		std::string con = read_error_context(stream);
 		throw std::runtime_error(
-			std::format("{}::{}: invalid rule start: {}", class_name, __func__, rest)
+			std::format("{}::{}: invalid rule start: {}", class_name, __func__, con)
 		);
 	}
 
 	std::string id = parse::read_until(stream, ',');
 	rule_t rule;
-	rule.lhs = id_map.at(id);
+	auto it = id_map.find(id);
+	if ( it == id_map.end() ) {
+		throw std::runtime_error(
+			std::format("{}::{}: unknown lhs integral id: {}", class_name, __func__, id)
+		);
+	}
+	rule.lhs = it->second;
 
 	// Now comes a list of rhs integrals and their coeffcients.
 	// If an integral is zero, we'll find "{}" and so have no rhs integrals.
@@ -141,16 +152,21 @@ rule_t fire_reader::read_rule(std::istream& stream) {
 rhs_t fire_reader::read_rhs(std::istream& stream) {
 
 	if ( ! parse::try_consume_char(stream, '{') ) {
-		std::string rest;
-		std::getline(stream, rest);
+		std::string con = read_error_context(stream);
 		throw std::runtime_error(
-			std::format("{}::{}: invalid rhs start: {}", class_name, __func__, rest)
+			std::format("{}::{}: invalid rhs start: {}", class_name, __func__, con)
 		);
 	}
 
 	rhs_t rhs;
 	std::string id = parse::read_until(stream, ',');
-	rhs.mi = id_map.at(id);
+	auto it = id_map.find(id);
+	if ( it == id_map.end() ) {
+		throw std::runtime_error(
+			std::format("{}::{}: unknown rhs integral id: {}", class_name, __func__, id)
+		);
+	}
+	rhs.mi = it->second;
 
 	// Now read the numerator and denominator of the coefficient.
 	// The numerator is everything until '/', and then the denominator is everything
@@ -185,10 +201,9 @@ rhs_t fire_reader::read_rhs(std::istream& stream) {
 integral_t fire_reader::read_integral(std::istream& stream) {
 
 	if ( ! parse::try_consume_char(stream, '{') ) {
-		std::string rest;
-		std::getline(stream, rest);
+		std::string con = read_error_context(stream);
 		throw std::runtime_error(
-			std::format("{}::{}: invalid integral start: {}", class_name, __func__, rest)
+			std::format("{}::{}: invalid integral start: {}", class_name, __func__, con)
 		);
 	}
 
@@ -207,7 +222,6 @@ integral_t fire_reader::read_integral(std::istream& stream) {
 void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 
 	std::chrono::time_point<std::chrono::steady_clock> start_time = std::chrono::steady_clock::now();
-	std::chrono::duration<float> run_time(0);
 
 	// Set up the stream:
 	std::ifstream raw_stream(filename, std::ios::binary);
@@ -239,23 +253,30 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 
 	// The main thread reads the stream and fills the queue:
 	uint64_t total_rules = 0;
-	do {
-		rule_t rule = read_rule(stream);
-		queue.push(std::move(rule));
-		total_rules++;
-	} while ( parse::try_consume_char(stream, ',') );
-	parse::expect_char(stream, '}');
-	// Signal the writer thread to finish
-	queue.complete();
+	try {
+		do {
+			rule_t rule = read_rule(stream);
+			queue.push(std::move(rule));
+			total_rules++;
+		} while ( parse::try_consume_char(stream, ',') );
+		parse::expect_char(stream, '}');
+	}
+	catch (...) {
+		queue.close();
+		workers.clear();
+		throw;
+	}
+	queue.close();
 	workers.clear();
 
 	// Finally, we check for the start of the "id_map", which we have constructed this already:
 	parse::expect_char(stream, ',');
 	parse::expect_char(stream, '{');
 
-	run_time += (std::chrono::steady_clock::now() - start_time);
+	std::chrono::duration<double> elapsed_time = std::chrono::steady_clock::now() - start_time;
 	std::cout << class_name << ": " << __func__ << " [" << num_workers << " workers]: processed "
-		<< total_rules << " rules in " << run_time.count() << "s" << std::endl;
+		<< total_rules << " rules in " << std::fixed << std::setprecision(3) << elapsed_time.count()
+		<< "s" << std::endl;
 }
 
 // #]

@@ -25,6 +25,19 @@ class fire_reader {
 
 		const std::string class_name = "fire_reader";
 
+		std::string read_error_context(std::istream& stream) {
+			const unsigned error_context = 140;
+			char c;
+			std::string err;
+			err.reserve(error_context);
+			while ( err.size() < error_context && stream.get(c) ) {
+				if ( c == '\n' ) break;
+				err += c;
+			}
+			if ( c != '\n' ) err += "...";
+			return err;
+		}
+
 	public:
 
 		fire_reader(std::string);
