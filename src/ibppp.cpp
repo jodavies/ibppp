@@ -23,11 +23,11 @@ int main(int argc, char* argv[]) {
 		desc.add_options()
 			("help,h", "Print usage options")
 			("cpus", boost::program_options::value<int>()->default_value(1),
-				"Number of formatting threads")
+				"Number of formatting worker threads")
 			("fire-table", boost::program_options::value<std::string>(),
 				"Relative path of gzip-compressed fire table")
 			("form-fill", boost::program_options::value<std::string>(),
-				"Relative path of FORM Fill output file")
+				"Relative path of FORM Fill output files; '#' in the name is mandatory, and replaced with the worker id")
 			("f-lhs", boost::program_options::value<std::string>()->default_value("f"),
 				"Function name for LHS integrals")
 			("f-rhs", boost::program_options::value<std::string>()->default_value("f"),
@@ -81,6 +81,11 @@ int main(int argc, char* argv[]) {
 			throw std::runtime_error("no output file specified");
 		}
 		const auto form_fill = vm.at("form-fill").as<std::string>();
+		if ( form_fill.find('#') == std::string::npos ) {
+			throw std::runtime_error(
+				std::format("ouput file name does not contain '#': {}", form_fill)
+			);
+		}
 
 		const auto lhs = vm.at("f-lhs").as<std::string>();
 		const auto rhs = vm.at("f-rhs").as<std::string>();

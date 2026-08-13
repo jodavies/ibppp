@@ -17,8 +17,8 @@ class table_writer {
 	private:
 		std::ofstream raw_out;
 		boost::iostreams::filtering_stream<boost::iostreams::output> out;
-		std::mutex out_lock;
 		std::string filename;
+		void open_output_file();
 
 		coeff_t format_num(const coeff_t&);
 		coeff_t format_den(const coeff_t&);
@@ -40,6 +40,10 @@ class table_writer {
 
 	public:
 		table_writer(std::string, std::vector<std::string>, std::string, std::string);
+		~table_writer() {
+			flint_cleanup();
+		}
+		std::unique_ptr<table_writer> create_worker_tw(uint32_t);
 		void write_form_fill(const rule_t&);
 };
 // #]
