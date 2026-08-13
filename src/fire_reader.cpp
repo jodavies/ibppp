@@ -221,6 +221,10 @@ integral_t fire_reader::read_integral(std::istream& stream) {
 
 void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 
+	if ( num_workers == 0 ) {
+		throw std::invalid_argument("num_workers must be > 0");
+	}
+
 	std::chrono::time_point<std::chrono::steady_clock> start_time = std::chrono::steady_clock::now();
 
 	// Set up the stream:
@@ -243,10 +247,11 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 	std::vector<std::jthread> workers;
 	workers.reserve(num_workers);
 	for ( uint32_t i = 0; i < num_workers; i++ ) {
-		workers.emplace_back([&] {
+		workers.emplace_back([&,i] {
+			auto worker_tw = tw.create_worker_tw(i);
 			rule_t rule;
 			while ( queue.pop(rule) ) {
-				tw.write_form_fill(rule);
+				worker_tw->write_form_fill(rule);
 			}
 		});
 	}

@@ -57,18 +57,10 @@ table_writer::table_writer(std::string filename_in, std::vector<std::string> var
 		var_mpoly_ep_pointers.push_back(mpp.d);
 	}
 
-	std::cout << class_name << ": vars:";
-	for ( size_t i = 0; i < var_names.size(); i++ ) {
-		std::cout << " " << var_names[i];
-	}
-	std::cout << " (->";
+	// Keep a copy of C string pointers for mpoly::to_string, we don't want to create it every call.
 	for ( size_t i = 0; i < var_names_ep.size(); i++ ) {
-		std::cout << " " << var_names_ep[i];
-		// Keep a copy of C string pointers for mpoly::to_string, we don't want
-		// to create it in every call.
 		var_names_ep_c.push_back(var_names_ep[i].c_str());
 	}
-	std::cout << ")" << std::endl;
 
 	// Make sure we found "d": for now it is required
 	if (d_var_index == std::numeric_limits<std::size_t>::max()) {
@@ -76,8 +68,33 @@ table_writer::table_writer(std::string filename_in, std::vector<std::string> var
 			std::format("{}::{}: variable list does not contain 'd'", class_name, __func__)
 		);
 	}
+}
+// #]
 
-	// Finally set up the output stream, now that we are happy with the variables
+// #[ table_writer::create_worker_tw
+
+std::unique_ptr<table_writer> table_writer::create_worker_tw(uint32_t worker_number) {
+
+	// Return a table_writer based on this one, with a worker-specific output filename.
+	std::string worker_filename = filename;
+	auto pos = worker_filename.find('#');
+	if ( pos == std::string::npos ) {
+		throw std::runtime_error(
+			std::format("{}::{}: output filename contains no '#': {}", class_name, __func__, filename)
+		);
+	}
+	worker_filename.replace(pos, 1, std::to_string(worker_number));
+
+	auto wrt = std::make_unique<table_writer>(worker_filename, var_names, f_lhs, f_rhs);
+	// The constructor does not open the output file, we do it explicitly:
+	wrt->open_output_file();
+	return wrt;
+}
+// #]
+
+// #[ table_writer::open_output_file
+
+void table_writer::open_output_file() {
 	raw_out.open(filename, std::ios::binary);
 	if ( ! raw_out.is_open() ) {
 		throw std::runtime_error(
@@ -86,7 +103,6 @@ table_writer::table_writer(std::string filename_in, std::vector<std::string> var
 	}
 	out.push(boost::iostreams::gzip_compressor());
 	out.push(raw_out);
-	std::cout << class_name << ": create " << filename << std::endl;
 }
 // #]
 
@@ -94,8 +110,8 @@ table_writer::table_writer(std::string filename_in, std::vector<std::string> var
 
 void table_writer::write_form_fill(const rule_t& rule) {
 
-	// Create the whole output string in memory, and then finally write to the
-	// file with a lock. There might be parallel writers.
+	// Create the whole output string in memory, and then finally write to the file.
+	// Each thread should have its own writer object, so there is no need to lock for file access.
 
 	std::string fill_str;
 	fill_str = "Fill " + f_lhs + rule.lhs.head + "(" + rule.lhs.indices + ") =\n";
@@ -107,8 +123,6 @@ void table_writer::write_form_fill(const rule_t& rule) {
 	}
 	fill_str += "\t;\n\n";
 
-	// It is important to lock here, to avoid concurrent writes to the stream.
-	std::lock_guard lock(out_lock);
 	out << fill_str;
 }
 // #]
