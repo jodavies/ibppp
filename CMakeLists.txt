@@ -34,6 +34,8 @@ target_link_libraries(ibppp PRIVATE
     Boost::iostreams
     Boost::program_options
     PkgConfig::FLINT
+    # Ubuntu 24.04's flint.pc apparently omits -lflint ?
+    flint
 )
 
 set_target_properties(ibppp PROPERTIES
