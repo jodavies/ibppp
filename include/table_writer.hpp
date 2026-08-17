@@ -20,8 +20,7 @@ class table_writer {
 		std::string filename;
 		void open_output_file();
 
-		coeff_t format_num(const coeff_t&);
-		coeff_t format_den(const coeff_t&);
+		coeff_t format_coeff(const coeff_t&, const coeff_t&);
 
 		// Global flint context and mpolys which we use for variable changing,
 		// which we must make sure to only read!
