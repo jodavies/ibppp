@@ -117,9 +117,8 @@ void table_writer::write_form_fill(const rule_t& rule) {
 	fill_str = "Fill " + f_lhs + rule.lhs.head + "(" + rule.lhs.indices + ") =\n";
 	for ( const auto& rhs : rule.rhs ) {
 		fill_str += "\t+ " + f_rhs + rhs.mi.head + "(" + rhs.mi.indices + ")";
-		coeff_t formatted_num = format_num(rhs.num);
-		coeff_t formatted_den = format_den(rhs.den);
-		fill_str +=" * " + formatted_num.s + formatted_den.s + "\n";
+		coeff_t formatted_coeff = format_coeff(rhs.num, rhs.den);
+		fill_str +=" * " + formatted_coeff.s + "\n";
 	}
 	fill_str += "\t;\n\n";
 
@@ -127,114 +126,101 @@ void table_writer::write_form_fill(const rule_t& rule) {
 }
 // #]
 
-// #[ table_writer::format_num
+// #[ table_writer::format_coeff
 //
-// Format a numerator by pulling "ep" out of terms, after replacing "d" with "4-2*ep".
-// Build a replacement "num" string and return it.
-
-coeff_t table_writer::format_num(const coeff_t& num_str) {
-
-	// If the input is "1", there is nothing to do:
-	if ( num_str.s == "1" ) {
-		return coeff_t("1");
-	}
-
-	std::string res("numep(");
+// Format an integral coefficient for the ouput. Replace d with 4-2*ep, and cancel
+// any new gcd between num and den. Then produce the num and den strings.
+coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_str) {
 
 	flint::mpoly num(num_str.s, var_names, ctx.d);
+	flint::mpoly den(den_str.s, var_names, ctx.d);
 	flint::mpoly numep(ctx.d);
+	flint::mpoly denep(ctx.d);
 
 	// Variable change d->ep:
 	fmpz_mpoly_compose_fmpz_mpoly(numep.d, num.d, var_mpoly_ep_pointers.data(), ctx.d, ctx.d);
-
-	flint::mpoly_univar numep_univar(ctx.d);
-	fmpz_mpoly_to_univar(numep_univar.d, numep.d, d_var_index, ctx.d);
-	const int64_t length = fmpz_mpoly_univar_length(numep_univar.d, ctx.d);
-
-	for ( int64_t term = length-1; term >= 0; term-- ) {
-		// Re-use num to store the coefficients:
-		fmpz_mpoly_univar_get_term_coeff(num.d, numep_univar.d, term, ctx.d);
-		const int64_t exponent = fmpz_mpoly_univar_get_term_exp_si(numep_univar.d, term, ctx.d);
-
-		res += "+num(" + num.to_string(var_names_ep_c.data()) + ")";
-		if ( exponent > 0 ) {
-			res += std::string("*") + var_names_ep[d_var_index];
-			if ( exponent > 1 ) {
-				res += std::string("^") + std::to_string(exponent);
-			}
-		}
-	}
-
-	res += ")";
-	return coeff_t(std::move(res));
-}
-// #]
-
-// #[ table_writer::format_den
-//
-// Factorize a denominator, tagging factors which depend only on "ep" after
-// replacing "d" with "4-2*ep".
-// Build a replacement "den" string and return it.
-
-coeff_t table_writer::format_den(const coeff_t& den_str) {
-
-	// If the input is "1", there is nothing to do:
-	if ( den_str.s == "1" ) {
-		return coeff_t("/1");
-	}
-
-	std::string res("");
-
-	flint::mpoly den(den_str.s, var_names, ctx.d);
-	flint::mpoly denep(ctx.d);
-	flint::mpoly_factor denep_fac(ctx.d);
-
-	// Variable change d->ep:
 	fmpz_mpoly_compose_fmpz_mpoly(denep.d, den.d, var_mpoly_ep_pointers.data(), ctx.d, ctx.d);
 
-	// Factor the new denominator:
-	fmpz_mpoly_factor(denep_fac.d, denep.d, ctx.d);
-	const int64_t num_factors = fmpz_mpoly_factor_length(denep_fac.d, ctx.d);
+	flint::mpoly gcd(ctx.d);
+	// Divide out a possible gcd between num and den, after replacing d with 4-2*ep
+	fmpz_mpoly_gcd_cofactors(gcd.d, numep.d, denep.d, numep.d, denep.d, ctx.d);
 
-	flint::fmpz overall_constant;
-	fmpz_mpoly_factor_get_constant_fmpz(overall_constant.d, denep_fac.d, ctx.d);
-	if ( ! fmpz_is_one(overall_constant.d) ) {
-		std::string overall_constant_str = overall_constant.to_string();
-		res += "*den(";
-		res += overall_constant_str;
+	// Create the output
+	std::string res;
+	if ( fmpz_mpoly_is_one(numep.d, ctx.d) ) {
+		res = "1";
+	}
+	else {
+		res = "numep(";
+		flint::mpoly_univar numep_univar(ctx.d);
+		fmpz_mpoly_to_univar(numep_univar.d, numep.d, d_var_index, ctx.d);
+		const int64_t length = fmpz_mpoly_univar_length(numep_univar.d, ctx.d);
+
+		for ( int64_t term = length-1; term >= 0; term-- ) {
+			// Re-use num to store the coefficients:
+			fmpz_mpoly_univar_get_term_coeff(num.d, numep_univar.d, term, ctx.d);
+			const int64_t exponent = fmpz_mpoly_univar_get_term_exp_si(numep_univar.d, term, ctx.d);
+
+			res += "+num(" + num.to_string(var_names_ep_c.data()) + ")";
+			if ( exponent > 0 ) {
+				res += std::string("*") + var_names_ep[d_var_index];
+				if ( exponent > 1 ) {
+					res += std::string("^") + std::to_string(exponent);
+				}
+			}
+		}
 		res += ")";
 	}
 
-	for ( int64_t i = 0; i < num_factors; i++ ) {
-		const int64_t exponent = fmpz_mpoly_factor_get_exp_si(denep_fac.d, i, ctx.d);
-		// Re-use the "den" mpoly to store the bases
-		fmpz_mpoly_factor_get_base(den.d, denep_fac.d, i, ctx.d);
-		std::string denep_fac_str = den.to_string(var_names_ep_c.data());
+	if ( fmpz_mpoly_is_one(denep.d, ctx.d) ) {
+		res += "/1";
+	}
+	else {
+		// Factor the new denominator:
+		flint::mpoly_factor denep_fac(ctx.d);
+		fmpz_mpoly_factor(denep_fac.d, denep.d, ctx.d);
+		const int64_t num_factors = fmpz_mpoly_factor_length(denep_fac.d, ctx.d);
 
-		// Check if the base contains "ep" (or "d") (the symbols don't have names
-		// until we print them: only d_var_index actually matters here)
-		const int64_t deg_ep = fmpz_mpoly_degree_si(den.d, d_var_index, ctx.d);
-
-		if ( fmpz_mpoly_equal(den.d, var_mpoly[d_var_index].d, ctx.d) ) {
-			res += "/";
-			res += denep_fac_str;
-			if ( exponent != 1 ) {
-				res += "^";
-				res += std::to_string(exponent);
-			}
+		flint::fmpz overall_constant;
+		fmpz_mpoly_factor_get_constant_fmpz(overall_constant.d, denep_fac.d, ctx.d);
+		if ( ! fmpz_is_one(overall_constant.d) ) {
+			std::string overall_constant_str = overall_constant.to_string();
+			res += "*den(";
+			res += overall_constant_str;
+			res += ")";
 		}
-		else {
-			if ( deg_ep > 0 ) {
-				res += "*denep(";
+
+		for ( int64_t i = 0; i < num_factors; i++ ) {
+			const int64_t exponent = fmpz_mpoly_factor_get_exp_si(denep_fac.d, i, ctx.d);
+			// Re-use the "den" mpoly to store the bases
+			fmpz_mpoly_factor_get_base(den.d, denep_fac.d, i, ctx.d);
+			std::string denep_fac_str = den.to_string(var_names_ep_c.data());
+
+			// Check if the base contains "ep" (or "d") (the symbols don't have names
+			// until we print them: only d_var_index actually matters here)
+			const int64_t deg_ep = fmpz_mpoly_degree_si(den.d, d_var_index, ctx.d);
+
+			if ( fmpz_mpoly_equal(den.d, var_mpoly[d_var_index].d, ctx.d) ) {
+				res += "/";
+				res += denep_fac_str;
+				if ( exponent != 1 ) {
+					res += "^";
+					res += std::to_string(exponent);
+				}
 			}
 			else {
-				res += "*den(";
-			}
-			res += denep_fac_str;
-			res += ")";
-			if ( exponent != 1 ) {
-				res += "^";
-				res += std::to_string(exponent);
+				if ( deg_ep > 0 ) {
+					res += "*denep(";
+				}
+				else {
+					res += "*den(";
+				}
+				res += denep_fac_str;
+				res += ")";
+				if ( exponent != 1 ) {
+					res += "^";
+					res += std::to_string(exponent);
+				}
 			}
 		}
 	}
