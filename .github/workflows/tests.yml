@@ -1,0 +1,35 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libboost-program-options-dev \
+            libboost-iostreams-dev \
+            libflint-dev \
+            gzip \
+            valgrind
+
+      - name: Build
+        run: |
+          cmake -S . -B builddir
+          cmake --build builddir --parallel
+
+      - name: Run FIRE tests
+        working-directory: test
+        run: |
+          chmod +x fire-test.sh
+          ./fire-test.sh

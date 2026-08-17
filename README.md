@@ -1,5 +1,7 @@
 # ibppp
 
+[![Test](https://github.com/jodavies/ibppp/actions/workflows/tests.yml/badge.svg)](https://github.com/jodavies/ibppp/actions/workflows/tests.yml)
+
 Post process IBP reduction tables, for use with FORM.
 
 Currently, `ibppp` can:
