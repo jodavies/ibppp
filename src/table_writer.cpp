@@ -115,10 +115,16 @@ void table_writer::write_form_fill(const rule_t& rule) {
 
 	std::string fill_str;
 	fill_str = "Fill " + f_lhs + rule.lhs.head + "(" + rule.lhs.indices + ") =\n";
-	for ( const auto& rhs : rule.rhs ) {
-		fill_str += "\t+ " + f_rhs + rhs.mi.head + "(" + rhs.mi.indices + ")";
-		coeff_t formatted_coeff = format_coeff(rhs.num, rhs.den);
-		fill_str +=" * " + formatted_coeff.s + "\n";
+	if ( rule.rhs.empty() ) {
+		// There are no rhs: the integral is 0.
+		fill_str += "\t0\n";
+	}
+	else {
+		for ( const auto& rhs : rule.rhs ) {
+			fill_str += "\t+ " + f_rhs + rhs.mi.head + "(" + rhs.mi.indices + ")";
+			coeff_t formatted_coeff = format_coeff(rhs.num, rhs.den);
+			fill_str +=" * " + formatted_coeff.s + "\n";
+		}
 	}
 	fill_str += "\t;\n\n";
 
