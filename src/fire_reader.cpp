@@ -258,6 +258,8 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 						worker_tw->write_form_fill(rule);
 					}
 				}
+				// Now that the worker_tw have left scope (destroying the FLINT members)
+				// clean up the FLINT caches.
 				flint_cleanup();
 			}
 			catch (...) {
@@ -277,10 +279,11 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 	try {
 		do {
 			rule_t rule = read_rule(stream);
-			queue.push(std::move(rule));
+			if ( ! queue.push(std::move(rule)) ) {
+				break;
+			}
 			total_rules++;
 		} while ( parse::try_consume_char(stream, ',') );
-		parse::expect_char(stream, '}');
 	}
 	catch (...) {
 		queue.close();
@@ -293,6 +296,8 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 		std::rethrow_exception(worker_error);
 	}
 
+	// Read the final closing } of the list of rules
+	parse::expect_char(stream, '}');
 	// Finally, we check for the start of the "id_map", which we have constructed this already:
 	parse::expect_char(stream, ',');
 	parse::expect_char(stream, '{');
