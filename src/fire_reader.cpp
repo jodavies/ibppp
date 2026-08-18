@@ -245,15 +245,30 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 	blocking_queue<rule_t> queue(4*num_workers);
 	// Start writer threads and wait for input to arrive in the queue:
 	std::vector<std::jthread> workers;
+	std::exception_ptr worker_error;
+	std::mutex worker_error_mutex;
 	workers.reserve(num_workers);
 	for ( uint32_t i = 0; i < num_workers; i++ ) {
 		workers.emplace_back([&,i] {
-			auto worker_tw = tw.create_worker_tw(i);
-			rule_t rule;
-			while ( queue.pop(rule) ) {
-				worker_tw->write_form_fill(rule);
+			try {
+				{
+					auto worker_tw = tw.create_worker_tw(i);
+					rule_t rule;
+					while ( queue.pop(rule) ) {
+						worker_tw->write_form_fill(rule);
+					}
+				}
+				flint_cleanup();
 			}
-			flint_cleanup();
+			catch (...) {
+				{
+					std::lock_guard lock(worker_error_mutex);
+					if ( ! worker_error ) {
+						worker_error = std::current_exception();
+					}
+				}
+				queue.abort();
+			}
 		});
 	}
 
@@ -274,6 +289,9 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 	}
 	queue.close();
 	workers.clear();
+	if ( worker_error ) {
+		std::rethrow_exception(worker_error);
+	}
 
 	// Finally, we check for the start of the "id_map", which we have constructed this already:
 	parse::expect_char(stream, ',');

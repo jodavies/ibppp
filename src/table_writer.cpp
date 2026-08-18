@@ -1,6 +1,5 @@
 #include <fstream>
 #include <format>
-#include <mutex>
 
 // For streaming compressed files in and out
 #include <boost/iostreams/filtering_stream.hpp>
