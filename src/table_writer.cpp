@@ -222,6 +222,8 @@ coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_st
 		// Factor the new denominator:
 		flint::mpoly_factor denep_fac(ctx.d);
 		fmpz_mpoly_factor(denep_fac.d, denep.d, ctx.d);
+		// Make sure the factor ordering is fixed, independent of FLINT version
+		fmpz_mpoly_factor_sort(denep_fac.d, ctx.d);
 		const int64_t num_factors = fmpz_mpoly_factor_length(denep_fac.d, ctx.d);
 
 		flint::fmpz overall_constant;
