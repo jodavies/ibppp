@@ -34,7 +34,7 @@ class blocking_queue {
 			}
 		}
 
-		void push(T item) {
+		bool push(T item) {
 
 			std::unique_lock lock(prot);
 			free_space_flag.wait(lock, [&] {
@@ -42,7 +42,7 @@ class blocking_queue {
 			});
 
 			if ( aborted ) {
-				return;
+				return false;
 			}
 
 			if ( closed ) {
@@ -52,9 +52,11 @@ class blocking_queue {
 			}
 
 			queue.push(std::move(item));
-			lock.unlock();
 
+			lock.unlock();
 			has_items_flag.notify_one();
+
+			return true;
 		}
 
 		bool pop(T& item) {
