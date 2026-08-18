@@ -26,7 +26,7 @@ fire_reader::fire_reader(std::string filename_in)
 
 // #[ fire_reader::read_integral_id_map
 //
-// Get the integral_id_map only, without storing anyting else. Unfortunately the map comes
+// Get the integral_id_map only, without storing anything else. Unfortunately the map comes
 // at the end of the file, so we have to run through the whole thing and find its start.
 // It is not great for performance, but there is no choice.
 
@@ -66,7 +66,7 @@ fire_reader::integral_id_map fire_reader::read_integral_id_map() {
 		integral_t new_integral = read_integral(stream);
 		parse::expect_char(stream, '}');
 
-		auto [it, inserted] = new_map.emplace(new_id, new_integral);
+		auto [it, inserted] = new_map.emplace(std::move(new_id), std::move(new_integral));
 		if ( ! inserted ) {
 			throw std::runtime_error(
 				std::format("{}::{}: duplicate integral id: {}", class_name, __func__, new_id)
@@ -126,7 +126,7 @@ rule_t fire_reader::read_rule(std::istream& stream) {
 	}
 	rule.lhs = it->second;
 
-	// Now comes a list of rhs integrals and their coeffcients.
+	// Now comes a list of rhs integrals and their coefficients.
 	// If an integral is zero, we'll find "{}" and so have no rhs integrals.
 	parse::expect_char(stream, '{');
 	if ( ! parse::try_consume_char(stream, '}') ) {
@@ -253,6 +253,7 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 			while ( queue.pop(rule) ) {
 				worker_tw->write_form_fill(rule);
 			}
+			flint_cleanup();
 		});
 	}
 

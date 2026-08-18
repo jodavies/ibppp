@@ -47,6 +47,11 @@ table_writer::table_writer(std::string filename_in, std::vector<std::string> var
 			// to make a higher variable-count context for flint.
 			var_mpoly_ep.emplace_back("4-2*d", var_names, ctx.d);
 		}
+		else if ( var_names[i] == "ep" ) {
+			throw std::runtime_error(
+				std::format("{}::{}: variable list cannot contain 'ep'", class_name, __func__)
+			);
+		}
 		else {
 			var_names_ep.push_back(var_names[i]);
 			var_mpoly_ep.emplace_back(var_names[i], var_names, ctx.d);
@@ -134,7 +139,7 @@ void table_writer::write_form_fill(const rule_t& rule) {
 
 // #[ table_writer::format_coeff
 //
-// Format an integral coefficient for the ouput. Replace d with 4-2*ep, and cancel
+// Format an integral coefficient for the output. Replace d with 4-2*ep, and cancel
 // any new gcd between num and den. Then produce the num and den strings.
 coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_str) {
 
@@ -144,16 +149,37 @@ coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_st
 	flint::mpoly denep(ctx.d);
 
 	// Variable change d->ep:
-	fmpz_mpoly_compose_fmpz_mpoly(numep.d, num.d, var_mpoly_ep_pointers.data(), ctx.d, ctx.d);
-	fmpz_mpoly_compose_fmpz_mpoly(denep.d, den.d, var_mpoly_ep_pointers.data(), ctx.d, ctx.d);
+	if ( ! fmpz_mpoly_compose_fmpz_mpoly(numep.d, num.d, var_mpoly_ep_pointers.data(), ctx.d, ctx.d) ) {
+		throw std::runtime_error(
+			std::format("{}::{}: FLINT mpoly compose failed", class_name, __func__)
+		);
+	}
+	if ( ! fmpz_mpoly_compose_fmpz_mpoly(denep.d, den.d, var_mpoly_ep_pointers.data(), ctx.d, ctx.d) ) {
+		throw std::runtime_error(
+			std::format("{}::{}: FLINT mpoly compose failed", class_name, __func__)
+		);
+	}
 
+
+	// Divide out a possible gcd between numep and denep, after replacing d with 4-2*ep.
+	// The resulting numep and denep are stored in the same objects.
+	// Storing the actual gcd is not really required, but it is returned anyway.
 	flint::mpoly gcd(ctx.d);
-	// Divide out a possible gcd between num and den, after replacing d with 4-2*ep
 	fmpz_mpoly_gcd_cofactors(gcd.d, numep.d, denep.d, numep.d, denep.d, ctx.d);
 
-	// Create the output
+
+	// Create the output. We write the numerator as a sum of ep powers multiplied by, in general,
+	// multivariate polynomial coefficients, stored in "num" functions to stop FORM immediately
+	// multiplying them out. The whole numerator is wrapped in "numep" for the same reason.
 	std::string res;
-	if ( fmpz_mpoly_is_one(numep.d, ctx.d) ) {
+	if ( fmpz_mpoly_is_zero(numep.d, ctx.d) ) {
+		// This should not happen!
+		throw std::runtime_error(
+			std::format("{}::{}: vanishing MI coefficient: ({})/({})", class_name, __func__,
+				num_str.s, den_str.s)
+		);
+	}
+	else if ( fmpz_mpoly_is_one(numep.d, ctx.d) ) {
 		res = "1";
 	}
 	else {
@@ -167,17 +193,29 @@ coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_st
 			fmpz_mpoly_univar_get_term_coeff(num.d, numep_univar.d, term, ctx.d);
 			const int64_t exponent = fmpz_mpoly_univar_get_term_exp_si(numep_univar.d, term, ctx.d);
 
-			res += "+num(" + num.to_string(var_names_ep_c.data()) + ")";
+			res += "+num(";
+			res += num.to_string(var_names_ep_c.data());
+			res += ")";
 			if ( exponent > 0 ) {
-				res += std::string("*") + var_names_ep[d_var_index];
+				res += std::string("*");
+				res += var_names_ep[d_var_index];
 				if ( exponent > 1 ) {
-					res += std::string("^") + std::to_string(exponent);
+					res += std::string("^");
+					res += std::to_string(exponent);
 				}
 			}
 		}
 		res += ")";
 	}
 
+
+	// We write the denominator as a product of factors:
+	//  - the overall constant is written as den(overall constant), unless it is 1
+	//  - poles in ep are written as 1/ep^n, so that FORM can easily discard ep powers within
+	//    numep, depending on the power of the pole which appears
+	//  - factors depending on ep are written as denep(ep+...)^n, to facilitate later series
+	//    expansion in FORM
+	//  - ep-independent factors are written as den(...)^n
 	if ( fmpz_mpoly_is_one(denep.d, ctx.d) ) {
 		res += "/1";
 	}
@@ -190,9 +228,8 @@ coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_st
 		flint::fmpz overall_constant;
 		fmpz_mpoly_factor_get_constant_fmpz(overall_constant.d, denep_fac.d, ctx.d);
 		if ( ! fmpz_is_one(overall_constant.d) ) {
-			std::string overall_constant_str = overall_constant.to_string();
 			res += "*den(";
-			res += overall_constant_str;
+			res += overall_constant.to_string();
 			res += ")";
 		}
 

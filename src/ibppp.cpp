@@ -13,8 +13,6 @@
 #include "fire_reader.hpp"
 #include "table_writer.hpp"
 
-using namespace std;
-
 
 int main(int argc, char* argv[]) {
 
@@ -27,13 +25,13 @@ int main(int argc, char* argv[]) {
 			("fire-table", boost::program_options::value<std::string>(),
 				"Relative path of gzip-compressed fire table")
 			("form-fill", boost::program_options::value<std::string>(),
-				"Relative path of FORM Fill output files; '#' in the name is mandatory, and replaced with the worker id")
+				"Relative path of FORM Fill output files; one '#' in the name is mandatory, and replaced with the worker id")
 			("f-lhs", boost::program_options::value<std::string>()->default_value("f"),
 				"Function name for LHS integrals")
 			("f-rhs", boost::program_options::value<std::string>()->default_value("f"),
 				"Function name for RHS integrals")
 			("vars", boost::program_options::value<std::string>(),
-				"Comma-separated list of variable names")
+				"Comma-separated list of variable names, which must contain d, and must not contain ep")
 		;
 		boost::program_options::variables_map vm;
 		boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -81,9 +79,9 @@ int main(int argc, char* argv[]) {
 			throw std::runtime_error("no output file specified");
 		}
 		const auto form_fill = vm.at("form-fill").as<std::string>();
-		if ( form_fill.find('#') == std::string::npos ) {
+		if ( std::count(form_fill.begin(), form_fill.end(), '#') != 1 ) {
 			throw std::runtime_error(
-				std::format("ouput file name does not contain '#': {}", form_fill)
+				std::format("output file name does not contain one '#': {}", form_fill)
 			);
 		}
 
