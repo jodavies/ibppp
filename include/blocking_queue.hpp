@@ -22,7 +22,8 @@ class blocking_queue {
 
 		std::queue<T> queue;
 		std::size_t max_queue_size;
-		bool done = false;
+		bool aborted = false;
+		bool closed = false;
 
 	public:
 
@@ -37,16 +38,21 @@ class blocking_queue {
 
 			std::unique_lock lock(prot);
 			free_space_flag.wait(lock, [&] {
-				return done || queue.size() < max_queue_size;
+				return closed || queue.size() < max_queue_size;
 			});
 
-			if ( done ) {
+			if ( aborted ) {
+				return;
+			}
+
+			if ( closed ) {
 				throw std::runtime_error(
 					std::format("{}: error: push on closed queue", __func__)
 				);
 			}
 
 			queue.push(std::move(item));
+			lock.unlock();
 
 			has_items_flag.notify_one();
 		}
@@ -55,8 +61,12 @@ class blocking_queue {
 
 			std::unique_lock lock(prot);
 			has_items_flag.wait(lock, [&] {
-				return done || ! queue.empty();
+				return closed || ! queue.empty();
 			});
+
+			if ( aborted ) {
+				return false;
+			}
 
 			if ( queue.empty() ) {
 				return false;
@@ -65,6 +75,7 @@ class blocking_queue {
 			item = std::move(queue.front());
 			queue.pop();
 
+			lock.unlock();
 			free_space_flag.notify_one();
 
 			return true;
@@ -73,9 +84,23 @@ class blocking_queue {
 		// No further items can be pushed to the queue.
 		// Existing items remain and can be popped until the queue is empty.
 		void close() {
-			std::lock_guard lock(prot);
-			done = true;
+			{
+				std::lock_guard lock(prot);
+				closed = true;
+			}
 			has_items_flag.notify_all();
+			free_space_flag.notify_all();
+		}
+
+		// 
+		void abort() {
+			{
+				std::lock_guard lock(prot);
+				aborted = true;
+				closed = true;
+			}
+			has_items_flag.notify_all();
+			free_space_flag.notify_all();
 		}
 };
 //#]
