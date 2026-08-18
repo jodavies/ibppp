@@ -39,9 +39,7 @@ class table_writer {
 
 	public:
 		table_writer(std::string, std::vector<std::string>, std::string, std::string);
-		~table_writer() {
-			flint_cleanup();
-		}
+		~table_writer() {}
 		std::unique_ptr<table_writer> create_worker_tw(uint32_t);
 		void write_form_fill(const rule_t&);
 };
