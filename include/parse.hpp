@@ -45,14 +45,14 @@ namespace parse {
 	// included in the brace-level counting. Since the strings in valid FIRE tables
 	// will always have matching opening and closing braces, this is OK.
 	inline void skip_nested_braces(std::istream& stream, const char open, const char close) {
-
 		int level = 0;
 		expect_char(stream, open);
 		level++;
-
+		// Using sbumpc here greatly improves performance
+		auto* buf = stream.rdbuf();
 		while ( level > 0 ) {
-			char c;
-			if ( ! (stream >> std::ws >> c) ) {
+			const int c = buf->sbumpc();
+			if ( c == std::char_traits<char>::eof() ) {
 				throw std::runtime_error(
 					std::format("{}: reached end of stream inside open {}/{} braces", __func__,
 						open, close)
@@ -61,7 +61,6 @@ namespace parse {
 			if ( c == open ) level++;
 			else if ( c == close ) level--;
 		}
-
 	}
 
 }

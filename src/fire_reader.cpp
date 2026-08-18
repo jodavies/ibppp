@@ -6,7 +6,7 @@
 #include <thread>
 
 // For streaming compressed files in and out
-#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filtering_streambuf.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
 
 #include "fire_reader.hpp"
@@ -41,9 +41,10 @@ fire_reader::integral_id_map fire_reader::read_integral_id_map() {
 			std::format("{}::{}: unable to open file {}", class_name, __func__, filename)
 		);
 	}
-	boost::iostreams::filtering_stream<boost::iostreams::input> stream;
-	stream.push(boost::iostreams::gzip_decompressor());
-	stream.push(raw_stream);
+	boost::iostreams::filtering_streambuf<boost::iostreams::input> streambuf;
+	streambuf.push(boost::iostreams::gzip_decompressor(), 16*1024);
+	streambuf.push(raw_stream);
+	std::istream stream(&streambuf);
 
 	// Open a list level, putting us at the start of the "rules" list. Then skip over it.
 	parse::expect_char(stream, '{');
@@ -69,7 +70,7 @@ fire_reader::integral_id_map fire_reader::read_integral_id_map() {
 		auto [it, inserted] = new_map.emplace(std::move(new_id), std::move(new_integral));
 		if ( ! inserted ) {
 			throw std::runtime_error(
-				std::format("{}::{}: duplicate integral id: {}", class_name, __func__, new_id)
+				std::format("{}::{}: duplicate integral id: {}", class_name, __func__, it->first)
 			);
 		}
 
@@ -234,9 +235,10 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 			std::format("{}::{}: unable to open file {}", class_name, __func__, filename)
 		);
 	}
-	boost::iostreams::filtering_stream<boost::iostreams::input> stream;
-	stream.push(boost::iostreams::gzip_decompressor());
-	stream.push(raw_stream);
+	boost::iostreams::filtering_streambuf<boost::iostreams::input> streambuf;
+	streambuf.push(boost::iostreams::gzip_decompressor(), 16*1024);
+	streambuf.push(raw_stream);
+	std::istream stream(&streambuf);
 
 	// Move to the list of rules:
 	parse::expect_char(stream, '{');
