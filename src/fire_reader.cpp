@@ -169,27 +169,9 @@ rhs_t fire_reader::read_rhs(std::istream& stream) {
 	}
 	rhs.mi = it->second;
 
-	// Now read the numerator and denominator of the coefficient.
-	// The numerator is everything until '/', and then the denominator is everything
-	// until '"'. If the denominator is 1, it is absent and there is no '/'.
+	// Now read the coefficient.
 	parse::expect_char(stream, '"');
-	std::string coeff = parse::read_until(stream, '"');
-	auto pos = coeff.find('/');
-	if ( pos == std::string::npos ) {
-		rhs.num.s = coeff;
-		rhs.den.s = "1";
-	}
-	else {
-		rhs.num.s = coeff.substr(0,pos);
-		rhs.den.s = coeff.substr(pos + 1);
-		// A second '/' should never happen!
-		auto check = rhs.den.s.find('/');
-		if ( check != std::string::npos ) {
-			throw std::runtime_error(
-				std::format("{}::{}: extra '/' in int {} coef: {}", class_name, __func__, id, coeff)
-			);
-		}
-	}
+	rhs.coeff.s = parse::read_until(stream, '"');
 
 	// Close the rhs:
 	parse::expect_char(stream, '}');

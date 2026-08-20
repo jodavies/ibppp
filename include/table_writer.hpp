@@ -20,7 +20,8 @@ class table_writer {
 		std::string filename;
 		void open_output_file();
 
-		coeff_t format_coeff(const coeff_t&, const coeff_t&);
+		coeff_t format_coeff(const coeff_t&);
+		bool trivial_coeff = false;
 
 		// Global flint context and mpolys which we use for variable changing,
 		// which we must make sure to only read!
@@ -38,7 +39,7 @@ class table_writer {
 		const std::string class_name = "table_writer";
 
 	public:
-		table_writer(std::string, std::vector<std::string>, std::string, std::string);
+		table_writer(std::string, std::vector<std::string>, std::string, std::string, bool);
 		~table_writer() {}
 		std::unique_ptr<table_writer> create_worker_tw(uint32_t);
 		void write_form_fill(const rule_t&);

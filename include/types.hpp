@@ -16,8 +16,7 @@ struct coeff_t {
 
 struct rhs_t {
 	integral_t mi;       // a "rhs" is an integral and a coefficient
-	coeff_t num;
-	coeff_t den;
+	coeff_t coeff;
 };
 
 struct rule_t {
