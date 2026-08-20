@@ -119,6 +119,7 @@ void table_writer::write_form_fill(const rule_t& rule) {
 	// Each thread should have its own writer object, so there is no need to lock for file access.
 
 	std::string fill_str;
+	fill_str.reserve(1024);
 	fill_str = "Fill " + f_lhs + rule.lhs.head + "(" + rule.lhs.indices + ") =\n";
 	if ( rule.rhs.empty() ) {
 		// There are no rhs: the integral is 0.
@@ -126,14 +127,15 @@ void table_writer::write_form_fill(const rule_t& rule) {
 	}
 	else {
 		for ( const auto& rhs : rule.rhs ) {
-			fill_str += "\t+ " + f_rhs + rhs.mi.head + "(" + rhs.mi.indices + ")";
-			coeff_t formatted_coeff = format_coeff(rhs.coeff);
-			fill_str +=" * " + formatted_coeff.s + "\n";
+			fill_str += "\t+ " + f_rhs + rhs.mi.head + "(" + rhs.mi.indices + ")" + " * ";
+			fill_str += format_coeff(rhs.coeff);
+			fill_str += "\n";
 		}
 	}
 	fill_str += "\t;\n\n";
 
-	out << fill_str;
+	// Avoid formatted-output stream
+	out.rdbuf()->sputn(fill_str.data(), fill_str.size());
 }
 // #]
 
@@ -141,7 +143,7 @@ void table_writer::write_form_fill(const rule_t& rule) {
 //
 // Format an integral coefficient for the output. Replace d with 4-2*ep, and cancel
 // any new gcd between num and den. Then produce the num and den strings.
-coeff_t table_writer::format_coeff(const coeff_t& integral_coeff) {
+std::string table_writer::format_coeff(const coeff_t& integral_coeff) {
 
 	flint::mpoly tmp(ctx.d);
 	flint::mpoly numep(ctx.d);
@@ -149,24 +151,14 @@ coeff_t table_writer::format_coeff(const coeff_t& integral_coeff) {
 
 	// Replace d with 4-2*ep in num and den, and divide out any resulting non-trivial gcd.
 	// The resulting expressions are in numep and denep.
-	const char* func = __func__;
 	auto dtoep = [&](const fmpz_mpoly_t num, const fmpz_mpoly_t den) {
-		if ( ! fmpz_mpoly_compose_fmpz_mpoly(numep.d, num, var_mpoly_ep_pointers.data(), ctx.d,
-			ctx.d) ) {
-
-			throw std::runtime_error(
-				std::format("{}::{}: FLINT mpoly compose failed", class_name, func)
-			);
-		}
-		if ( ! fmpz_mpoly_compose_fmpz_mpoly(denep.d, den, var_mpoly_ep_pointers.data(), ctx.d,
-			ctx.d) ) {
-
-			throw std::runtime_error(
-				std::format("{}::{}: FLINT mpoly compose failed", class_name, func)
-			);
-		}
+		flint::compose_one_var(numep.d, tmp.d, num, var_mpoly_ep_pointers[d_var_index], d_var_index,
+			ctx.d);
+		flint::compose_one_var(denep.d, tmp.d, den, var_mpoly_ep_pointers[d_var_index], d_var_index,
+			ctx.d);
 		fmpz_mpoly_gcd_cofactors(tmp.d, numep.d, denep.d, numep.d, denep.d, ctx.d);
 	};
+
 
 	if ( trivial_coeff ) {
 		// Here we assume we can parse the coefficient string as "num/den" (from FIRE). Otherwise,
@@ -297,7 +289,7 @@ coeff_t table_writer::format_coeff(const coeff_t& integral_coeff) {
 		}
 	}
 
-	return coeff_t(std::move(res));
+	return res;
 }
 // #]
 
