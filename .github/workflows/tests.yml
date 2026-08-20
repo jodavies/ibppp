@@ -7,7 +7,11 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+
+    env:
+      FLINT_VERSION: 3.6.0
+      FLINT_PREFIX: ${{ github.workspace }}/flint
 
     steps:
       - name: Check out repository
@@ -17,13 +21,47 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libboost-program-options-dev \
-            libboost-iostreams-dev \
-            libflint-dev \
+            autoconf \
             gzip \
+            libboost-iostreams-dev \
+            libboost-program-options-dev \
+            libgmp-dev \
+            libmpfr-dev \
+            libtool-bin \
+            make \
             valgrind
 
-      - name: Build
+      - name: Cache FLINT
+        id: flint-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.FLINT_PREFIX }}
+          key: flint-${{ env.FLINT_VERSION }}-ubuntu-24.04-${{ runner.arch }}
+
+      - name: Build FLINT
+        if: steps.flint-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -L \
+            "https://github.com/flintlib/flint/releases/download/v${FLINT_VERSION}/flint-${FLINT_VERSION}.tar.gz" \
+            -o flint.tar.gz
+
+          tar xf flint.tar.gz
+          cd "flint-${FLINT_VERSION}"
+
+          ./configure --disable-static --prefix="${FLINT_PREFIX}"
+          make -j"$(nproc)"
+          make install
+
+      - name: Configure FLINT
+        run: |
+          echo "${FLINT_PREFIX}/lib" >> "$GITHUB_PATH"
+          echo "${FLINT_PREFIX}/bin" >> "$GITHUB_PATH"
+          echo "LD_LIBRARY_PATH=${FLINT_PREFIX}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+          echo "LIBRARY_PATH=${FLINT_PREFIX}/lib${LIBRARY_PATH:+:$LIBRARY_PATH}" >> "$GITHUB_ENV"
+          echo "PKG_CONFIG_PATH=${FLINT_PREFIX}/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=${FLINT_PREFIX}${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}" >> "$GITHUB_ENV"
+
+      - name: Build ibppp
         run: |
           cmake -S . -B builddir
           cmake --build builddir --parallel
