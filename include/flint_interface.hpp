@@ -240,6 +240,69 @@ namespace flint {
 			}
 			~mpoly_univar() noexcept { fmpz_mpoly_univar_clear(d, ctx); }
 	};
+
+	// When we replace d with "4-2*d" (and later print the d as ep) we can use the built-in
+	// fmpz_mpoly_compose_fmpz_mpoly. However we have a specific replacement: d is replaced
+	// by a polynomial only in d, and the other variables are not touched.
+	// We can do a bit better than the more general fmpz_mpoly_compose_fmpz_mpoly by manually
+	// constructing the result: take all of the coefficients of d with fmpz_mpoly_univar_t
+	// and multiply out the Horner representation with d -> 4-2*d.
+	// This gives a ~10% runtime improvement.
+	// So here: f is the polynomial, g is the replacement of "d", var is the index of "d" in
+	// the context. The result is returned in "res" and "t" is temporary storage, passed from
+	// the caller.
+	inline void compose_one_var(fmpz_mpoly_t res, fmpz_mpoly_t t, const fmpz_mpoly_t f,
+		const fmpz_mpoly_t g, const slong var, const fmpz_mpoly_ctx_t ctx) {
+
+		fmpz_mpoly_univar_t uf;
+		fmpz_mpoly_univar_init(uf, ctx);
+
+		fmpz_mpoly_to_univar(uf, f, var, ctx);
+		const slong n = fmpz_mpoly_univar_length(uf, ctx);
+
+		if ( n == 0 ) {
+			fmpz_mpoly_zero(res, ctx);
+		}
+		else {
+			// Put the coefficient of the largest power of var in "res", and store its exponent:
+			fmpz_mpoly_univar_get_term_coeff(res, uf, 0, ctx);
+			slong exp_prev = fmpz_mpoly_univar_get_term_exp_si(uf, 0, ctx);
+
+			// Multiply out the Horner representation, accounting for possible gaps between the
+			// current and previous exponent:
+			for ( slong i = 1; i < n; i++ ) {
+				const slong exp = fmpz_mpoly_univar_get_term_exp_si(uf, i, ctx);
+				const slong gap = exp_prev - exp;
+				if ( gap == 1 ) {
+					// Just multiply by g:
+					fmpz_mpoly_mul(res, res, g, ctx);
+				}
+				else {
+					// Multiply by g^gap:
+					fmpz_mpoly_pow_ui(t, g, gap, ctx);
+					fmpz_mpoly_mul(res, res, t, ctx);
+				}
+
+				// Now put the coefficient of the next power of var in "t", and add it to "res":
+				fmpz_mpoly_univar_get_term_coeff(t, uf, i, ctx);
+				fmpz_mpoly_add(res, res, t, ctx);
+
+				exp_prev = exp;
+			}
+
+			// We are done, unless the lowest power of var is > 0:
+			const slong exp = fmpz_mpoly_univar_get_term_exp_si(uf, n-1, ctx);
+			if ( exp != 0 ) {
+				fmpz_mpoly_pow_ui(t, g, exp, ctx);
+				fmpz_mpoly_mul(res, res, t, ctx);
+			}
+
+			fmpz_mpoly_set(res, res, ctx);
+		}
+
+		fmpz_mpoly_univar_clear(uf, ctx);
+	}
+
 };
 
 // #]

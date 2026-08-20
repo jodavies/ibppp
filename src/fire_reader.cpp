@@ -287,9 +287,11 @@ void fire_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 	parse::expect_char(stream, '{');
 
 	std::chrono::duration<double> elapsed_time = std::chrono::steady_clock::now() - start_time;
+	// Print some runtime statistics, including the time and (gzip compressed) processing rate
 	std::cout << class_name << ": " << __func__ << " [" << num_workers << " workers]: processed "
-		<< total_rules << " rules in " << std::fixed << std::setprecision(3) << elapsed_time.count()
-		<< "s" << std::endl;
+		<< total_rules << " rules in " << std::fixed << std::setprecision(2) << elapsed_time.count()
+		<< "s [" << std::setprecision(1) << total_rules/1000.0/elapsed_time.count() << " kr/s, "
+		<< raw_stream.tellg()/1024.0/1024.0/elapsed_time.count() << " MiB/s]" << std::endl;
 }
 
 // #]

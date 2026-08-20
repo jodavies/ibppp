@@ -20,7 +20,7 @@ class table_writer {
 		std::string filename;
 		void open_output_file();
 
-		coeff_t format_coeff(const coeff_t&);
+		std::string format_coeff(const coeff_t&);
 		bool trivial_coeff = false;
 
 		// Global flint context and mpolys which we use for variable changing,
@@ -33,6 +33,7 @@ class table_writer {
 		std::vector<flint::mpoly> var_mpoly_ep;
 		std::vector<fmpz_mpoly_struct*> var_mpoly_ep_pointers;
 		size_t d_var_index = std::numeric_limits<std::size_t>::max();
+
 
 		std::string f_lhs, f_rhs;
 
