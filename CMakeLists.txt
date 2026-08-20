@@ -14,6 +14,7 @@ pkg_check_modules(FLINT REQUIRED IMPORTED_TARGET flint)
 add_executable(ibppp
     src/ibppp.cpp
     src/fire_reader.cpp
+    src/kira_reader.cpp
     src/table_writer.cpp
 )
 

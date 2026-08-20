@@ -16,6 +16,10 @@ namespace parse {
 		return true;
 	}
 
+	inline void consume_ws(std::istream& stream) {
+		stream >> std::ws;
+	}
+
 	inline void expect_char(std::istream& stream, const char expected) {
 		char c;
 		if ( ! (stream >> std::ws >> c) ) {

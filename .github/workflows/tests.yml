@@ -28,8 +28,8 @@ jobs:
           cmake -S . -B builddir
           cmake --build builddir --parallel
 
-      - name: Run FIRE tests
+      - name: Run FIRE and Kira tests
         working-directory: test
         run: |
-          chmod +x fire-test.sh
-          ./fire-test.sh
+          chmod +x test.sh
+          ./test.sh
