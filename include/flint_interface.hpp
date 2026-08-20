@@ -9,6 +9,7 @@
 #include <flint/fmpz.h>
 #include <flint/fmpz_mpoly.h>
 #include <flint/fmpz_mpoly_factor.h>
+#include <flint/fmpz_mpoly_q.h>
 #include <flint/fmpz_poly.h>
 #include <flint/fmpz_poly_factor.h>
 
@@ -114,6 +115,18 @@ namespace flint {
 				return *this;
 			}
 
+			void set(const string& str, std::vector<std::string>& vars) {
+				std::vector<const char*> vars_c;
+				for ( const auto& v: vars ) {
+					vars_c.push_back(v.c_str());
+				}
+				if ( fmpz_mpoly_set_str_pretty(d, str.c_str(), vars_c.data(), ctx) ) {
+					throw std::runtime_error(
+						std::format("{}: fmpz_mpoly parse error: {}", __func__, str)
+					);
+				}
+			}
+
 			void print(const string& text) const {
 				cout << text;
 				fmpz_mpoly_print_pretty(d, 0, ctx);
@@ -126,6 +139,63 @@ namespace flint {
 			}
 			[[nodiscard]] std::string to_string(const char** vars) {
 				char *str = fmpz_mpoly_get_str_pretty(d, vars, ctx);
+				std::string res(str);
+				flint_free(str);
+				return res;
+			}
+	};
+
+	class mpolyq {
+		private:
+			fmpz_mpoly_ctx_struct *ctx; // We need to keep a copy of the context pointer for clearing.
+		public:
+			fmpz_mpoly_q_t d;
+			explicit mpolyq(fmpz_mpoly_ctx_struct *ctx_in) : ctx(ctx_in) { fmpz_mpoly_q_init(d, ctx); }
+			explicit mpolyq(const std::string& str, std::vector<std::string>& vars,
+				fmpz_mpoly_ctx_struct *ctx_in) : ctx(ctx_in) {
+				fmpz_mpoly_q_init(d, ctx);
+				std::vector<const char*> vars_c;
+				for ( const auto& v: vars ) {
+					vars_c.push_back(v.c_str());
+				}
+				if ( fmpz_mpoly_q_set_str_pretty(d, str.c_str(), vars_c.data(), ctx) ) {
+					throw std::runtime_error(
+						std::format("{}: fmpz_mpoly_q parse error: {}", __func__, str)
+					);
+				}
+			}
+			~mpolyq() noexcept { fmpz_mpoly_q_clear(d, ctx); }
+
+			mpolyq(const mpolyq&) = delete;
+			mpolyq& operator=(const mpolyq&) = delete;
+			mpolyq(mpolyq&& other) noexcept : ctx(other.ctx) {
+				fmpz_mpoly_q_init(d, ctx);
+				fmpz_mpoly_q_swap(d, other.d, ctx);
+			}
+			mpolyq& operator=(mpolyq&& other) {
+				if (this != &other) {
+					if (ctx != other.ctx) {
+						throw std::runtime_error(
+							std::format("{}: context mismatch", __func__)
+						);
+					}
+					fmpz_mpoly_q_swap(d, other.d, ctx);
+				}
+				return *this;
+			}
+
+			void print(const string& text) const {
+				cout << text;
+				fmpz_mpoly_q_print_pretty(d, 0, ctx);
+				cout << endl;
+			}
+			void print(const string& text, const char** vars) {
+				cout << text;
+				fmpz_mpoly_q_print_pretty(d, vars, ctx);
+				cout << endl;
+			}
+			[[nodiscard]] std::string to_string(const char** vars) {
+				char *str = fmpz_mpoly_q_get_str_pretty(d, vars, ctx);
 				std::string res(str);
 				flint_free(str);
 				return res;

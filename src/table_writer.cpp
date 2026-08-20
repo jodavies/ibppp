@@ -19,9 +19,9 @@
 
 // #[ table_writer::table_writer
 table_writer::table_writer(std::string filename_in, std::vector<std::string> vars_in,
-	std::string lhs_in, std::string rhs_in)
-	: filename(filename_in), ctx(vars_in.size()), var_names(vars_in),
-		f_lhs(lhs_in), f_rhs(rhs_in)
+	std::string lhs_in, std::string rhs_in, bool trivial_coeff_in)
+	: filename(filename_in), trivial_coeff(trivial_coeff_in), ctx(vars_in.size()),
+		var_names(vars_in), f_lhs(lhs_in), f_rhs(rhs_in)
 {
 	// Make sure var_names doesn't contain duplicate entries:
 	std::vector var_names_dedup = var_names;
@@ -89,7 +89,8 @@ std::unique_ptr<table_writer> table_writer::create_worker_tw(uint32_t worker_num
 	}
 	worker_filename.replace(pos, 1, std::to_string(worker_number));
 
-	auto wrt = std::make_unique<table_writer>(worker_filename, var_names, f_lhs, f_rhs);
+	auto wrt = std::make_unique<table_writer>(worker_filename, var_names, f_lhs, f_rhs,
+		trivial_coeff);
 	// The constructor does not open the output file, we do it explicitly:
 	wrt->open_output_file();
 	return wrt;
@@ -126,7 +127,7 @@ void table_writer::write_form_fill(const rule_t& rule) {
 	else {
 		for ( const auto& rhs : rule.rhs ) {
 			fill_str += "\t+ " + f_rhs + rhs.mi.head + "(" + rhs.mi.indices + ")";
-			coeff_t formatted_coeff = format_coeff(rhs.num, rhs.den);
+			coeff_t formatted_coeff = format_coeff(rhs.coeff);
 			fill_str +=" * " + formatted_coeff.s + "\n";
 		}
 	}
@@ -140,31 +141,61 @@ void table_writer::write_form_fill(const rule_t& rule) {
 //
 // Format an integral coefficient for the output. Replace d with 4-2*ep, and cancel
 // any new gcd between num and den. Then produce the num and den strings.
-coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_str) {
+coeff_t table_writer::format_coeff(const coeff_t& integral_coeff) {
 
-	flint::mpoly num(num_str.s, var_names, ctx.d);
-	flint::mpoly den(den_str.s, var_names, ctx.d);
+	flint::mpoly tmp(ctx.d);
 	flint::mpoly numep(ctx.d);
 	flint::mpoly denep(ctx.d);
 
-	// Variable change d->ep:
-	if ( ! fmpz_mpoly_compose_fmpz_mpoly(numep.d, num.d, var_mpoly_ep_pointers.data(), ctx.d, ctx.d) ) {
-		throw std::runtime_error(
-			std::format("{}::{}: FLINT mpoly compose failed", class_name, __func__)
-		);
-	}
-	if ( ! fmpz_mpoly_compose_fmpz_mpoly(denep.d, den.d, var_mpoly_ep_pointers.data(), ctx.d, ctx.d) ) {
-		throw std::runtime_error(
-			std::format("{}::{}: FLINT mpoly compose failed", class_name, __func__)
-		);
-	}
+	// Replace d with 4-2*ep in num and den, and divide out any resulting non-trivial gcd.
+	// The resulting expressions are in numep and denep.
+	const char* func = __func__;
+	auto dtoep = [&](const fmpz_mpoly_t num, const fmpz_mpoly_t den) {
+		if ( ! fmpz_mpoly_compose_fmpz_mpoly(numep.d, num, var_mpoly_ep_pointers.data(), ctx.d,
+			ctx.d) ) {
 
+			throw std::runtime_error(
+				std::format("{}::{}: FLINT mpoly compose failed", class_name, func)
+			);
+		}
+		if ( ! fmpz_mpoly_compose_fmpz_mpoly(denep.d, den, var_mpoly_ep_pointers.data(), ctx.d,
+			ctx.d) ) {
 
-	// Divide out a possible gcd between numep and denep, after replacing d with 4-2*ep.
-	// The resulting numep and denep are stored in the same objects.
-	// Storing the actual gcd is not really required, but it is returned anyway.
-	flint::mpoly gcd(ctx.d);
-	fmpz_mpoly_gcd_cofactors(gcd.d, numep.d, denep.d, numep.d, denep.d, ctx.d);
+			throw std::runtime_error(
+				std::format("{}::{}: FLINT mpoly compose failed", class_name, func)
+			);
+		}
+		fmpz_mpoly_gcd_cofactors(tmp.d, numep.d, denep.d, numep.d, denep.d, ctx.d);
+	};
+
+	if ( trivial_coeff ) {
+		// Here we assume we can parse the coefficient string as "num/den" (from FIRE). Otherwise,
+		// sending FIRE coefficients through the mpolyq parser is a ~10% performance regression.
+		flint::mpoly num(ctx.d);
+		flint::mpoly den(ctx.d);
+		auto split = integral_coeff.s.find('/');
+		if ( split == std::string::npos ) {
+			num.set(integral_coeff.s, var_names);
+			den.set("1", var_names);
+		}
+		else {
+			num.set(integral_coeff.s.substr(0,split), var_names);
+			auto check = integral_coeff.s.substr(split+1).find('/');
+			if ( check != std::string::npos ) {
+				throw std::runtime_error(
+					std::format("{}::{}: extra '/' in int coeff: {}", class_name, __func__,
+						integral_coeff.s)
+				);
+			}
+			den.set(integral_coeff.s.substr(split+1), var_names);
+		}
+		dtoep(num.d, den.d);
+	}
+	else {
+		// Here we parse more general rational polynomial expressions (from Kira).
+		flint::mpolyq coeff(integral_coeff.s, var_names, ctx.d);
+		dtoep(fmpz_mpoly_q_numref(coeff.d), fmpz_mpoly_q_denref(coeff.d));
+	}
 
 
 	// Create the output. We write the numerator as a sum of ep powers multiplied by, in general,
@@ -174,8 +205,7 @@ coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_st
 	if ( fmpz_mpoly_is_zero(numep.d, ctx.d) ) {
 		// This should not happen!
 		throw std::runtime_error(
-			std::format("{}::{}: vanishing MI coefficient: ({})/({})", class_name, __func__,
-				num_str.s, den_str.s)
+			std::format("{}::{}: vanishing MI coefficient: {}", class_name, __func__, integral_coeff.s)
 		);
 	}
 	else if ( fmpz_mpoly_is_one(numep.d, ctx.d) ) {
@@ -188,12 +218,11 @@ coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_st
 		const int64_t length = fmpz_mpoly_univar_length(numep_univar.d, ctx.d);
 
 		for ( int64_t term = length-1; term >= 0; term-- ) {
-			// Re-use num to store the coefficients:
-			fmpz_mpoly_univar_get_term_coeff(num.d, numep_univar.d, term, ctx.d);
+			fmpz_mpoly_univar_get_term_coeff(tmp.d, numep_univar.d, term, ctx.d);
 			const int64_t exponent = fmpz_mpoly_univar_get_term_exp_si(numep_univar.d, term, ctx.d);
 
 			res += "+num(";
-			res += num.to_string(var_names_ep_c.data());
+			res += tmp.to_string(var_names_ep_c.data());
 			res += ")";
 			if ( exponent > 0 ) {
 				res += std::string("*");
@@ -236,15 +265,14 @@ coeff_t table_writer::format_coeff(const coeff_t& num_str, const coeff_t& den_st
 
 		for ( int64_t i = 0; i < num_factors; i++ ) {
 			const int64_t exponent = fmpz_mpoly_factor_get_exp_si(denep_fac.d, i, ctx.d);
-			// Re-use the "den" mpoly to store the bases
-			fmpz_mpoly_factor_get_base(den.d, denep_fac.d, i, ctx.d);
-			std::string denep_fac_str = den.to_string(var_names_ep_c.data());
+			fmpz_mpoly_factor_get_base(tmp.d, denep_fac.d, i, ctx.d);
+			std::string denep_fac_str = tmp.to_string(var_names_ep_c.data());
 
 			// Check if the base contains "ep" (or "d") (the symbols don't have names
 			// until we print them: only d_var_index actually matters here)
-			const int64_t deg_ep = fmpz_mpoly_degree_si(den.d, d_var_index, ctx.d);
+			const int64_t deg_ep = fmpz_mpoly_degree_si(tmp.d, d_var_index, ctx.d);
 
-			if ( fmpz_mpoly_equal(den.d, var_mpoly[d_var_index].d, ctx.d) ) {
+			if ( fmpz_mpoly_equal(tmp.d, var_mpoly[d_var_index].d, ctx.d) ) {
 				res += "/";
 				res += denep_fac_str;
 				if ( exponent != 1 ) {

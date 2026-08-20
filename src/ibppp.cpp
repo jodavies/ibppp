@@ -89,7 +89,7 @@ int main(int argc, char* argv[]) {
 		const auto rhs = vm.at("f-rhs").as<std::string>();
 
 		fire_reader fr(fire_table);
-		table_writer tw(form_fill, vars, lhs, rhs);
+		table_writer tw(form_fill, vars, lhs, rhs, true);
 		fr.stream_rules(tw, cpus);
 	}
 
