@@ -3,8 +3,9 @@
 
 #include <iostream>
 
-#include "types.hpp"
+#include "table_reader.hpp"
 #include "table_writer.hpp"
+#include "types.hpp"
 
 // #[ class kira_reader
 class kira_reader {
@@ -13,6 +14,12 @@ class kira_reader {
 
 		rule_t     read_rule(std::istream&);
 		rhs_t      read_rhs(std::istream&);
+
+		void begin_rules(std::istream&);
+		bool more_rules(std::istream&);
+		void end_rules(std::istream&);
+		friend void table_reader::stream_rules(kira_reader&, const std::string&, table_writer&,
+			const uint32_t);
 
 		std::string filename;
 
