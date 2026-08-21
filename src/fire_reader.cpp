@@ -81,7 +81,7 @@ fire_reader::integral_id_map fire_reader::read_integral_id_map() {
 	parse::expect_char(stream, '}');
 	stream >> std::ws;
 	if ( ! stream.eof() ) {
-		std::string con = read_error_context(stream);
+		std::string con = parse::read_error_context(stream);
 		throw std::runtime_error(
 			std::format("{}::{}: unexpected extra stream content: {}", class_name, __func__, con)
 		);
@@ -111,7 +111,7 @@ fire_reader::integral_id_map fire_reader::read_integral_id_map() {
 rule_t fire_reader::read_rule(std::istream& stream) {
 
 	if ( ! parse::try_consume_char(stream, '{') ) {
-		std::string con = read_error_context(stream);
+		std::string con = parse::read_error_context(stream);
 		throw std::runtime_error(
 			std::format("{}::{}: invalid rule start: {}", class_name, __func__, con)
 		);
@@ -153,7 +153,7 @@ rule_t fire_reader::read_rule(std::istream& stream) {
 rhs_t fire_reader::read_rhs(std::istream& stream) {
 
 	if ( ! parse::try_consume_char(stream, '{') ) {
-		std::string con = read_error_context(stream);
+		std::string con = parse::read_error_context(stream);
 		throw std::runtime_error(
 			std::format("{}::{}: invalid rhs start: {}", class_name, __func__, con)
 		);
@@ -184,7 +184,7 @@ rhs_t fire_reader::read_rhs(std::istream& stream) {
 integral_t fire_reader::read_integral(std::istream& stream) {
 
 	if ( ! parse::try_consume_char(stream, '{') ) {
-		std::string con = read_error_context(stream);
+		std::string con = parse::read_error_context(stream);
 		throw std::runtime_error(
 			std::format("{}::{}: invalid integral start: {}", class_name, __func__, con)
 		);
