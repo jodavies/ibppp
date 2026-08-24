@@ -97,7 +97,8 @@ namespace table_reader {
 		// Verify that we've reached the end of the rules as expected
 		reader.end_rules(stream);
 
-		auto elapsed_time = std::chrono::steady_clock::now() - start_time;
+		auto elapsed_time = std::chrono::duration<double>(
+			std::chrono::steady_clock::now() - start_time );
 
 		// Print some runtime statistics, including the time and (gzip compressed) processing rate
 		std::cout << __func__ << ": [" << num_workers << " workers]:"
