@@ -17,12 +17,20 @@ run_test_valgrind() {
 	local vars="$5"
 	local lhs="$6"
 	local rhs="$7"
+	local ep_expand="${8:-}"
 
-	printf 'Running for %-40s : (%s cpus) : ' "$input" "$cpus"
+	if [[ -n "$ep_expand" ]]; then
+		local extra_args=(--ep-expand "$ep_expand")
+	else
+		local extra_args=()
+	fi
+
+
+	printf 'Running for %-40s : (ep^%-2s) (%s cpus) : ' "$input" "$ep_expand" "$cpus"
 
 	if ! OUT=$(valgrind --leak-check=full --errors-for-leak-kinds=definite --error-exitcode=1 \
-		../bin/ibppp --$mode-table "$input" --form-fill "$outputmask" \
-		--cpus "$cpus" --vars "$vars" --f-lhs "$lhs" --f-rhs "$rhs" 2>&1); then
+		../bin/ibppp --"$mode"-table "$input" --form-fill "$outputmask" \
+		--cpus "$cpus" --vars "$vars" --f-lhs "$lhs" --f-rhs "$rhs" "${extra_args[@]}" 2>&1); then
 
 		echo "FAILED (ibppp)"
 		echo "$OUT"
@@ -46,25 +54,19 @@ mkdir -p output
 rm -f output/*
 
 # This set of tests runs under valgrind
-run_test_valgrind fire tables/fire-doublebox.tables.m.gz      fill-doublebox.             1 d,s,t             db midb || err=1
-run_test_valgrind fire tables/fire-nbox2w.6-6.tables.m.gz     fill-nbox2w.6-6.            1 d,m,u,v,w         nb minb || err=1
-run_test_valgrind fire tables/fire-pentabox.14-26.tables.m.gz fill-pentabox.14-26.        1 d,s23,s34,s45,s51 pb mipb || err=1
-run_test_valgrind fire tables/fire-v2.tables.m.gz             fill-v2.                    1 d                 v  miv  || err=1
+for cpu in 1 4; do
+	for ep in "" 0 1 5; do
+		run_test_valgrind fire tables/fire-doublebox.tables.m.gz      fill-doublebox.ep"$ep".             "$cpu" d,s,t             db midb "$ep" || err=1
+		run_test_valgrind fire tables/fire-nbox2w.6-6.tables.m.gz     fill-nbox2w.6-6.ep"$ep".            "$cpu" d,m,u,v,w         nb minb "$ep" || err=1
+		run_test_valgrind fire tables/fire-pentabox.14-26.tables.m.gz fill-pentabox.14-26.ep"$ep".        "$cpu" d,s23,s34,s45,s51 pb mipb "$ep" || err=1
+		run_test_valgrind fire tables/fire-v2.tables.m.gz             fill-v2.ep"$ep".                    "$cpu" d                 v  miv  "$ep" || err=1
 
-run_test_valgrind fire tables/fire-doublebox.tables.m.gz      fill-doublebox.             4 d,s,t             db midb || err=1
-run_test_valgrind fire tables/fire-nbox2w.6-6.tables.m.gz     fill-nbox2w.6-6.            4 d,m,u,v,w         nb minb || err=1
-run_test_valgrind fire tables/fire-pentabox.14-26.tables.m.gz fill-pentabox.14-26.        4 d,s23,s34,s45,s51 pb mipb || err=1
-run_test_valgrind fire tables/fire-v2.tables.m.gz             fill-v2.                    4 d                 v  miv  || err=1
-
-run_test_valgrind kira tables/kira-box.m.gz                   fill-box.                   1 d,s,t             "" mi   || err=1
-run_test_valgrind kira tables/kira-box_firefly.m.gz           fill-box_firefly.           1 d,s,t             "" mi   || err=1
-run_test_valgrind kira tables/kira-topo7massless.m.gz         fill-topo7massless.         1 d,t               "" mi   || err=1
-run_test_valgrind kira tables/kira-topo7massless_firefly.m.gz fill-topo7massless_firefly. 1 d,t               "" mi   || err=1
-
-run_test_valgrind kira tables/kira-box.m.gz                   fill-box.                   4 d,s,t             "" mi   || err=1
-run_test_valgrind kira tables/kira-box_firefly.m.gz           fill-box_firefly.           4 d,s,t             "" mi   || err=1
-run_test_valgrind kira tables/kira-topo7massless.m.gz         fill-topo7massless.         4 d,t               "" mi   || err=1
-run_test_valgrind kira tables/kira-topo7massless_firefly.m.gz fill-topo7massless_firefly. 4 d,t               "" mi   || err=1
+		run_test_valgrind kira tables/kira-box.m.gz                   fill-box.ep"$ep".                   "$cpu" d,s,t             "" mi   "$ep" || err=1
+		run_test_valgrind kira tables/kira-box_firefly.m.gz           fill-box_firefly.ep"$ep".           "$cpu" d,s,t             "" mi   "$ep" || err=1
+		run_test_valgrind kira tables/kira-topo7massless.m.gz         fill-topo7massless.ep"$ep".         "$cpu" d,t               "" mi   "$ep" || err=1
+		run_test_valgrind kira tables/kira-topo7massless_firefly.m.gz fill-topo7massless_firefly.ep"$ep". "$cpu" d,t               "" mi   "$ep" || err=1
+	done
+done
 
 rm -rf output
 exit "$err"

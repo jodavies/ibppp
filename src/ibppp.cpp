@@ -39,6 +39,8 @@ int main(int argc, char* argv[]) {
 			("vars", boost::program_options::value<std::string>(),
 				"Comma-separated list of variable names, which must contain d, and must not contain "
 				"ep.")
+			("ep-expand", boost::program_options::value<int>(),
+				"Optionally Laurent-expand to the specified depth in ep. Must be >= 0.")
 		;
 		boost::program_options::variables_map vm;
 		boost::program_options::store(boost::program_options::parse_command_line(argc, argv, desc), vm);
@@ -96,17 +98,33 @@ int main(int argc, char* argv[]) {
 			);
 		}
 
+		bool ep_expand;
+		int ep_order;
+		if ( vm.count("ep-expand") != 0 ) {
+			ep_order = vm.at("ep-expand").as<int>();
+			if ( ep_order < 0 ) {
+				throw std::runtime_error(
+					std::format("ep-expand parameter must be >= 0")
+				);
+			}
+			ep_expand = true;
+		}
+		else {
+			ep_order = 0;
+			ep_expand = false;
+		}
+
 		const auto lhs = vm.at("f-lhs").as<std::string>();
 		const auto rhs = vm.at("f-rhs").as<std::string>();
 
 		if ( vm.count("fire-table") != 0 ) {
 			fire_reader fr(table);
-			table_writer tw(form_fill, vars, lhs, rhs, true);
+			table_writer tw(form_fill, vars, lhs, rhs, true, ep_expand, ep_order);
 			fr.stream_rules(tw, cpus);
 		}
 		else {
 			kira_reader kr(table);
-			table_writer tw(form_fill, vars, lhs, rhs, false);
+			table_writer tw(form_fill, vars, lhs, rhs, false, ep_expand, ep_order);
 			kr.stream_rules(tw, cpus);
 		}
 	}

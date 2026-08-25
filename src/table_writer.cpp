@@ -19,9 +19,11 @@
 
 // #[ table_writer::table_writer
 table_writer::table_writer(std::string filename_in, std::vector<std::string> vars_in,
-	std::string lhs_in, std::string rhs_in, bool trivial_coeff_in)
+	std::string lhs_in, std::string rhs_in, bool trivial_coeff_in, bool ep_expand_in,
+	int32_t ep_order_in)
 	: filename(filename_in), trivial_coeff(trivial_coeff_in), ctx(vars_in.size()),
-		var_names(vars_in), f_lhs(lhs_in), f_rhs(rhs_in)
+		var_names(vars_in), f_lhs(lhs_in), f_rhs(rhs_in), ep_expand(ep_expand_in),
+		ep_order(ep_order_in)
 {
 	// Make sure var_names doesn't contain duplicate entries:
 	std::vector var_names_dedup = var_names;
@@ -90,7 +92,7 @@ std::unique_ptr<table_writer> table_writer::create_worker_tw(uint32_t worker_num
 	worker_filename.replace(pos, 1, std::to_string(worker_number));
 
 	auto wrt = std::make_unique<table_writer>(worker_filename, var_names, f_lhs, f_rhs,
-		trivial_coeff);
+		trivial_coeff, ep_expand, ep_order);
 	// The constructor does not open the output file, we do it explicitly:
 	wrt->open_output_file();
 	return wrt;
@@ -108,6 +110,12 @@ void table_writer::open_output_file() {
 	}
 	out.push(boost::iostreams::gzip_compressor());
 	out.push(raw_out);
+	if ( ep_expand ) {
+		std::cout << class_name << ": [expand to ep^" << ep_order << "] form-fill: " << filename << std::endl;
+	}
+	else {
+		std::cout << class_name << ": form-fill:" << filename << std::endl;
+	}
 }
 // #]
 
@@ -127,9 +135,15 @@ void table_writer::write_form_fill(const rule_t& rule) {
 	}
 	else {
 		for ( const auto& rhs : rule.rhs ) {
-			fill_str += "\t+ " + f_rhs + rhs.mi.head + "(" + rhs.mi.indices + ")" + " * ";
-			fill_str += format_coeff(rhs.coeff);
-			fill_str += "\n";
+			// format_coeff returns a vector. In ep-exact mode it will have a single entry
+			// representing the coefficient. In ep-expansion mode it has an entry for each
+			// ep power and its coefficient. We multiple each by the MI, so we can just loop:
+			std::vector<std::string> formatted = format_coeff(rhs.coeff);
+			for ( const auto& term : formatted ) {
+				fill_str += "\t+ " + f_rhs + rhs.mi.head + "(" + rhs.mi.indices + ")" + " * ";
+				fill_str += term;
+				fill_str += "\n";
+			}
 		}
 	}
 	fill_str += "\t;\n\n";
@@ -142,8 +156,11 @@ void table_writer::write_form_fill(const rule_t& rule) {
 // #[ table_writer::format_coeff
 //
 // Format an integral coefficient for the output. Replace d with 4-2*ep, and cancel
-// any new gcd between num and den. Then produce the num and den strings.
-std::string table_writer::format_coeff(const coeff_t& integral_coeff) {
+// any new gcd between num and den. Optionally, Laurent-expand around ep->0 to ep_order.
+// The final formatted result is returned as a vector of strings, with two modes:
+// 	- ep_expand false: exact coefficient string in a single vector entry
+// 	- ep_expand true : ep coefficient strings each as a vector entry
+std::vector<std::string> table_writer::format_coeff(const coeff_t& integral_coeff) {
 
 	flint::mpoly tmp(ctx.d);
 	flint::mpoly numep(ctx.d);
@@ -190,10 +207,21 @@ std::string table_writer::format_coeff(const coeff_t& integral_coeff) {
 	}
 
 
-	// Create the output. We write the numerator as a sum of ep powers multiplied by, in general,
-	// multivariate polynomial coefficients, stored in "num" functions to stop FORM immediately
-	// multiplying them out. The whole numerator is wrapped in "numep" for the same reason.
-	std::string res;
+	if ( ep_expand ) {
+		flint::mpolyq tmp(ctx.d);
+		fmpz_mpoly_swap(numep.d, fmpz_mpoly_q_numref(tmp.d), ctx.d);
+		fmpz_mpoly_swap(denep.d, fmpz_mpoly_q_denref(tmp.d), ctx.d);
+		fmpz_mpoly_q_canonicalise(tmp.d, ctx.d);
+		return format_coeff_ep_expand(tmp.d);
+	}
+
+
+	// Create the ep-exact output. We write the numerator as a sum of ep powers multiplied by, in
+	// general, multivariate polynomial coefficients, stored in "num" functions to stop FORM
+	// immediately multiplying them out. The whole numerator is wrapped in "numep" for the same
+	// reason.
+	std::vector<std::string> res;
+	res.push_back("");
 	if ( fmpz_mpoly_is_zero(numep.d, ctx.d) ) {
 		// This should not happen!
 		throw std::runtime_error(
@@ -201,10 +229,10 @@ std::string table_writer::format_coeff(const coeff_t& integral_coeff) {
 		);
 	}
 	else if ( fmpz_mpoly_is_one(numep.d, ctx.d) ) {
-		res = "1";
+		res[0] = "1";
 	}
 	else {
-		res = "numep(";
+		res[0] = "numep(";
 		flint::mpoly_univar numep_univar(ctx.d);
 		fmpz_mpoly_to_univar(numep_univar.d, numep.d, d_var_index, ctx.d);
 		const int64_t length = fmpz_mpoly_univar_length(numep_univar.d, ctx.d);
@@ -213,19 +241,19 @@ std::string table_writer::format_coeff(const coeff_t& integral_coeff) {
 			fmpz_mpoly_univar_get_term_coeff(tmp.d, numep_univar.d, term, ctx.d);
 			const int64_t exponent = fmpz_mpoly_univar_get_term_exp_si(numep_univar.d, term, ctx.d);
 
-			res += "+num(";
-			res += tmp.to_string(var_names_ep_c.data());
-			res += ")";
+			res[0] += "+num(";
+			res[0] += tmp.to_string(var_names_ep_c.data());
+			res[0] += ")";
 			if ( exponent > 0 ) {
-				res += std::string("*");
-				res += var_names_ep[d_var_index];
+				res[0] += std::string("*");
+				res[0] += var_names_ep[d_var_index];
 				if ( exponent > 1 ) {
-					res += std::string("^");
-					res += std::to_string(exponent);
+					res[0] += std::string("^");
+					res[0] += std::to_string(exponent);
 				}
 			}
 		}
-		res += ")";
+		res[0] += ")";
 	}
 
 
@@ -237,7 +265,7 @@ std::string table_writer::format_coeff(const coeff_t& integral_coeff) {
 	//    expansion in FORM
 	//  - ep-independent factors are written as den(...)^n
 	if ( fmpz_mpoly_is_one(denep.d, ctx.d) ) {
-		res += "/1";
+		res[0] += "/1";
 	}
 	else {
 		// Factor the new denominator:
@@ -250,9 +278,9 @@ std::string table_writer::format_coeff(const coeff_t& integral_coeff) {
 		flint::fmpz overall_constant;
 		fmpz_mpoly_factor_get_constant_fmpz(overall_constant.d, denep_fac.d, ctx.d);
 		if ( ! fmpz_is_one(overall_constant.d) ) {
-			res += "*den(";
-			res += overall_constant.to_string();
-			res += ")";
+			res[0] += "*den(";
+			res[0] += overall_constant.to_string();
+			res[0] += ")";
 		}
 
 		for ( int64_t i = 0; i < num_factors; i++ ) {
@@ -265,25 +293,25 @@ std::string table_writer::format_coeff(const coeff_t& integral_coeff) {
 			const int64_t deg_ep = fmpz_mpoly_degree_si(tmp.d, d_var_index, ctx.d);
 
 			if ( fmpz_mpoly_equal(tmp.d, var_mpoly[d_var_index].d, ctx.d) ) {
-				res += "/";
-				res += denep_fac_str;
+				res[0] += "/";
+				res[0] += denep_fac_str;
 				if ( exponent != 1 ) {
-					res += "^";
-					res += std::to_string(exponent);
+					res[0] += "^";
+					res[0] += std::to_string(exponent);
 				}
 			}
 			else {
 				if ( deg_ep > 0 ) {
-					res += "*denep(";
+					res[0] += "*denep(";
 				}
 				else {
-					res += "*den(";
+					res[0] += "*den(";
 				}
-				res += denep_fac_str;
-				res += ")";
+				res[0] += denep_fac_str;
+				res[0] += ")";
 				if ( exponent != 1 ) {
-					res += "^";
-					res += std::to_string(exponent);
+					res[0] += "^";
+					res[0] += std::to_string(exponent);
 				}
 			}
 		}
@@ -291,5 +319,64 @@ std::string table_writer::format_coeff(const coeff_t& integral_coeff) {
 
 	return res;
 }
+// #]
+
+// #[ table_writer::format_coeff_ep_expand
+//
+// Expand the coefficient in ep, and then produce a vector formatted strings for the coefficients.
+// In the context, ep is at d_var_index.
+std::vector<std::string> table_writer::format_coeff_ep_expand(const fmpz_mpoly_q_t coeff) {
+
+	fmpz_mpoly_q_t *series_coeffs;
+	int64_t leading_exponent;
+
+	// Expand in ep. The function allocates series_coeffs. We'll need to free it properly.
+	flint::fmpz_mpoly_q_laurent_series(&series_coeffs, &leading_exponent, coeff, d_var_index,
+		ep_order, ctx.d);
+	// The number of terms in the result depends on how deeply we expanded, and what (possibly
+	// negative) the leading power of the expansion is:
+	const int64_t n_terms = ep_order - leading_exponent + 1;
+
+	std::vector<std::string> res;
+
+	flint::mpoly tmp(ctx.d);
+	std::string str;
+	for ( int i = 0; i < n_terms; i++ ) {
+		if ( fmpz_mpoly_q_is_zero(series_coeffs[i], ctx.d) ) {
+			continue;
+		}
+		str  = "ep^";
+		str += std::to_string(leading_exponent + i);
+		fmpz_mpoly_swap(tmp.d, fmpz_mpoly_q_numref(series_coeffs[i]), ctx.d);
+		if ( fmpz_mpoly_is_one(tmp.d, ctx.d) ) {
+			str += " * 1";
+		}
+		else {
+			str += " * num(";
+			str += tmp.to_string(var_names_ep_c.data());
+			str += ")";
+		}
+		fmpz_mpoly_swap(tmp.d, fmpz_mpoly_q_denref(series_coeffs[i]), ctx.d);
+		if ( ! fmpz_mpoly_is_one(tmp.d, ctx.d) ) {
+			str += "*den(";
+			str += tmp.to_string(var_names_ep_c.data());
+			str += ")";
+		}
+		res.push_back(std::move(str));
+	}
+	str  = "ep^";
+	str += std::to_string(ep_order+1);
+	str += " * warnep";
+	res.push_back(std::move(str));
+
+	// Clean up
+	for ( int i = 0; i < n_terms; i++ ) {
+		fmpz_mpoly_q_clear(series_coeffs[i], ctx.d);
+	}
+	flint_free(series_coeffs);
+
+	return res;
+}
+
 // #]
 
