@@ -241,6 +241,7 @@ namespace flint {
 			~mpoly_univar() noexcept { fmpz_mpoly_univar_clear(d, ctx); }
 	};
 
+
 	// When we replace d with "4-2*d" (and later print the d as ep) we can use the built-in
 	// fmpz_mpoly_compose_fmpz_mpoly. However we have a specific replacement: d is replaced
 	// by a polynomial only in d, and the other variables are not touched.
@@ -303,6 +304,149 @@ namespace flint {
 		fmpz_mpoly_univar_clear(uf, ctx);
 	}
 
+
+	// Compute the Laurent series of rational polynomial "f" in variable "var" (which indexes the
+	// context "ctx"), around var->0, up to and including "var"^"order". The leading power of the
+	// result is returned in "leading_exponent" which may be negative.
+	inline void fmpz_mpoly_q_laurent_series(fmpz_mpoly_q_t **series_coeffs,
+		slong *leading_exponent, const fmpz_mpoly_q_t f, const slong var, const slong order,
+		const fmpz_mpoly_ctx_t ctx) {
+
+		if ( fmpz_mpoly_q_is_zero(f, ctx) ) {
+			*series_coeffs = NULL;
+			*leading_exponent = 0;
+			return;
+		}
+
+		// First, we need to extract the coefficients of var in the numerator and denominator,
+		// and determine their leading powers. We'll have to correct the powers in the result.
+		// fmpz_mpoly_univar_t have the terms ordered from highest to lowest exponent.
+		fmpz_mpoly_univar_t num, den;
+
+		fmpz_mpoly_univar_init(num, ctx);
+		fmpz_mpoly_to_univar(num, fmpz_mpoly_q_numref(f), var, ctx);
+		const slong num_length = fmpz_mpoly_univar_length(num, ctx);
+		const slong num_leading_exponent = fmpz_mpoly_univar_get_term_exp_si(num, num_length-1, ctx);
+
+		fmpz_mpoly_univar_init(den, ctx);
+		fmpz_mpoly_to_univar(den, fmpz_mpoly_q_denref(f), var, ctx);
+		const slong den_length = fmpz_mpoly_univar_length(den, ctx);
+		const slong den_leading_exponent = fmpz_mpoly_univar_get_term_exp_si(den, den_length-1, ctx);
+
+		*leading_exponent = num_leading_exponent - den_leading_exponent;
+		const slong n_terms = order - *leading_exponent + 1;
+
+		if ( n_terms <= 0 ) {
+			// The result is zero, just return. It is up to the caller to not try to access
+			// series_coeffs, based on the requested order parameter and returned *leading_exponent.
+			fmpz_mpoly_univar_clear(num, ctx);
+			fmpz_mpoly_univar_clear(den, ctx);
+			*series_coeffs = NULL;
+			return;
+		}
+
+		// Now we can implicitly shift num (and den) to start from var^0 and contain powers up to
+		// var^(max_exponent - 1 + num_leading_exponent) (and analogously for den):
+		// 	num = sum_{i=0}^{max} num_i * var^i
+		// num (and den) are stored sparsely, there may be gaps between exponents of stored terms.
+		//
+		// The Laurent series coefficients can be written using the usual series division recursion:
+		// 	num(var)/den(var) = sum_{i=0}^{order} coeff_i * var^i
+		// where coeff_i is a rational polynomial of the remaining variables of ctx, and
+		// 	coeff_0 = num_0/den_0
+		// and
+		// 	coeff_i = (num_i - sum_{j=1}^{i} den_j coeff_{i-j})/den_0
+		//
+		// The powers of var in the result must be shifted by *leading_exponent, by the caller.
+
+		// These must each be cleared, and then *series_coeffs free'd, by the caller:
+		*series_coeffs = reinterpret_cast<fmpz_mpoly_q_t*>(
+			flint_malloc(n_terms*sizeof(fmpz_mpoly_q_t)) );
+		for ( slong i = 0; i < n_terms; i++ ) {
+			fmpz_mpoly_q_init((*series_coeffs)[i], ctx);
+		}
+
+		// Store den_0:
+		fmpz_mpoly_q_t den_0;
+		fmpz_mpoly_q_init(den_0, ctx);
+		fmpz_mpoly_univar_get_term_coeff(fmpz_mpoly_q_numref(den_0), den, den_length-1, ctx);
+		fmpz_mpoly_one(fmpz_mpoly_q_denref(den_0), ctx);
+		fmpz_mpoly_q_canonicalise(den_0, ctx);
+
+		// Set coeff_0:
+		fmpz_mpoly_univar_get_term_coeff(fmpz_mpoly_q_numref((*series_coeffs)[0]), num, num_length-1,
+			ctx);
+		fmpz_mpoly_univar_get_term_coeff(fmpz_mpoly_q_denref((*series_coeffs)[0]), den, den_length-1,
+			ctx);
+		fmpz_mpoly_q_canonicalise((*series_coeffs)[0], ctx);
+
+		// Set coeff_i:
+		// Bear in mind that there might be gaps in the terms, vanishing coefficients are not stored
+		// in num and den.
+		fmpz_mpoly_q_t tmp_num, tmp_den;
+		fmpz_mpoly_q_init(tmp_num, ctx);
+		fmpz_mpoly_q_init(tmp_den, ctx);
+		slong num_term = 1;
+		for ( slong i = 1; i < n_terms; i++ ) {
+
+			// num_i
+			if ( num_term < num_length &&
+				fmpz_mpoly_univar_get_term_exp_si(num, num_length-1-num_term, ctx) ==
+				num_leading_exponent + i ) {
+
+				// num_i is non-zero:
+				fmpz_mpoly_univar_get_term_coeff(fmpz_mpoly_q_numref(tmp_num), num,
+					num_length-1-num_term, ctx);
+				fmpz_mpoly_one(fmpz_mpoly_q_denref(tmp_num), ctx);
+				fmpz_mpoly_q_canonicalise(tmp_num, ctx);
+				// "Consume" the term
+				num_term++;
+			}
+			else {
+				// num_i is zero:
+				fmpz_mpoly_q_set_si(tmp_num, 0, ctx);
+			}
+
+			fmpz_mpoly_q_set((*series_coeffs)[i], tmp_num, ctx);
+
+			// - sum_{j=1}^{i} den_j coeff_{i-j}
+			slong den_term = 1;
+			for ( slong j = 1; j <= i; j++ ) {
+				// den_j
+				if ( den_term < den_length &&
+					fmpz_mpoly_univar_get_term_exp_si(den, den_length-1-den_term, ctx) ==
+					den_leading_exponent + j ) {
+
+					// den_j is non-zero:
+					fmpz_mpoly_univar_get_term_coeff(fmpz_mpoly_q_numref(tmp_den), den,
+						den_length-1-den_term, ctx);
+					fmpz_mpoly_one(fmpz_mpoly_q_denref(tmp_den), ctx);
+					fmpz_mpoly_q_canonicalise(tmp_den, ctx);
+					// "Consume" the term
+					den_term++;
+				}
+				else {
+					// den_j is zero:
+					fmpz_mpoly_q_set_si(tmp_den, 0, ctx);
+				}
+
+				fmpz_mpoly_q_mul(tmp_den, tmp_den, (*series_coeffs)[i-j], ctx);
+				fmpz_mpoly_q_neg(tmp_den, tmp_den, ctx);
+
+				fmpz_mpoly_q_add((*series_coeffs)[i], (*series_coeffs)[i], tmp_den, ctx);
+			}
+
+			// Finally divide by den_0:
+			fmpz_mpoly_q_div((*series_coeffs)[i], (*series_coeffs)[i], den_0, ctx);
+		}
+
+		fmpz_mpoly_q_clear(den_0, ctx);
+		fmpz_mpoly_q_clear(tmp_num, ctx);
+		fmpz_mpoly_q_clear(tmp_den, ctx);
+
+		fmpz_mpoly_univar_clear(num, ctx);
+		fmpz_mpoly_univar_clear(den, ctx);
+	}
 };
 
 // #]

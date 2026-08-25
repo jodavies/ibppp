@@ -20,7 +20,8 @@ class table_writer {
 		std::string filename;
 		void open_output_file();
 
-		std::string format_coeff(const coeff_t&);
+		std::vector<std::string> format_coeff(const coeff_t&);
+		std::vector<std::string> format_coeff_ep_expand(const fmpz_mpoly_q_t);
 		bool trivial_coeff = false;
 
 		// Global flint context and mpolys which we use for variable changing,
@@ -34,13 +35,16 @@ class table_writer {
 		std::vector<fmpz_mpoly_struct*> var_mpoly_ep_pointers;
 		size_t d_var_index = std::numeric_limits<std::size_t>::max();
 
-
 		std::string f_lhs, f_rhs;
+
+		bool ep_expand = false;
+		int32_t ep_order = 0;
 
 		const std::string class_name = "table_writer";
 
 	public:
-		table_writer(std::string, std::vector<std::string>, std::string, std::string, bool);
+		table_writer(std::string, std::vector<std::string>, std::string, std::string, bool,
+			bool, int32_t);
 		~table_writer() {}
 		std::unique_ptr<table_writer> create_worker_tw(uint32_t);
 		void write_form_fill(const rule_t&);
