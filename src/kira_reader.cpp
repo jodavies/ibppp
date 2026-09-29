@@ -42,6 +42,11 @@ void kira_reader::stream_rules(table_writer& tw, uint32_t num_workers) {
 // or
 // 	 + 0
 // and terminates with a ",".
+//
+// If the output is from Firefly and an integral vanishes, it will be given as
+// 	0
+// without the leading '+'.
+//
 // The num and den may themselves contain "/", if the output is from FireFly.
 // In addition, if the output is from FireFly, num and den polynomial terms
 // have rational coefficients.
@@ -62,22 +67,27 @@ rule_t kira_reader::read_rule(std::istream& stream) {
 
 	// Now follow the rhs integrals and coefficients.
 	// Each rhs integral is on a single line which starts with "+".
-	// If the lhs integral vanishes, we'll just have "+ 0".
-	// Pick up the first '+':
-	parse::expect_char(stream, '+');
-	do {
-		if ( parse::try_consume_char(stream, '0') ) {
-			// The lhs integral vanishes. We don't expect to have already read any rhs!
-			if ( rule.rhs.size() != 0 ) {
-				throw std::runtime_error(
-					std::format("{}::{}: found \"+ 0\" on non-trivial rhs of {}[{}]",
-						class_name, __func__, rule.lhs.head, rule.lhs.indices)
-				);
+	// If the lhs integral vanishes, we'll just have "+ 0" (or "0", from Firefly)
+	if ( parse::try_consume_char(stream, '0') ) {
+		// This integral vanishes, there will be no further terms. The rhs remains empty.
+	}
+	else {
+		// Pick up the first '+':
+		parse::expect_char(stream, '+');
+		do {
+			if ( parse::try_consume_char(stream, '0') ) {
+				// The lhs integral vanishes. We don't expect to have already read any rhs!
+				if ( rule.rhs.size() != 0 ) {
+					throw std::runtime_error(
+						std::format("{}::{}: found \"+ 0\" on non-trivial rhs of {}[{}]",
+							class_name, __func__, rule.lhs.head, rule.lhs.indices)
+					);
+				}
+				break;
 			}
-			break;
-		}
-		rule.rhs.push_back(read_rhs(stream));
-	} while ( parse::try_consume_char(stream, '+') );
+			rule.rhs.push_back(read_rhs(stream));
+		} while ( parse::try_consume_char(stream, '+') );
+	}
 
 	return rule;
 }
